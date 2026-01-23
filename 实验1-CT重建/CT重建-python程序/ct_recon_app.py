@@ -428,15 +428,65 @@ class CTReconstructionApp:
             self.raw_canvas.draw()
 
     def _display_sinogram_data(self):
-        """显示投影数据（正弦图）"""
+        """显示投影数据（正弦图）- 最终版：X轴=角度，Y轴=探测器 + 修复显示范围缩小"""
         if self.sinogram_data is not None:
             self.sinogram_ax.clear()
-            self.sinogram_ax.imshow(self.sinogram_data.T, cmap='gray')  # 转置后显示更直观
-            self.sinogram_ax.set_title(
-                f"CT投影数据 (角度数: {len(self.angles_data)}, 探测器数: {self.sinogram_data.shape[1]})",
-                fontsize=self.font_size_large, fontfamily=self.font_family
+
+            # ========== 核心1：固定坐标轴范围（匹配你的需求） ==========
+            self.sinogram_ax.set_xlim(0, 180)  # X轴：投影角度（°）
+            self.sinogram_ax.set_ylim(-1, 1)  # Y轴：探测器坐标（归一化）
+
+            # 获取原始数据维度
+            num_angles = len(self.angles_data)  # 角度数（X轴维度）
+            num_detectors = self.sinogram_data.shape[1]  # 探测器数（Y轴维度）
+
+            # ========== 核心2：数据转置 + 正确的extent映射 ==========
+            # sinogram_data 原始维度：(num_angles, num_detectors)
+            # 转置后：(num_detectors, num_angles) → 行=探测器（Y轴），列=角度（X轴）
+            # extent格式：[X最小值, X最大值, Y最小值, Y最大值]
+            im = self.sinogram_ax.imshow(
+                self.sinogram_data.T,  # 必须转置，让角度对应X轴、探测器对应Y轴
+                cmap='gray',
+                extent=[0, 180, -1, 1],  # X轴0-180°，Y轴-1到1（归一化探测器）
+                aspect='auto',  # 自动适配宽高比，保证显示尺寸一致
+                interpolation='nearest'  # 避免插值模糊
             )
-            self.sinogram_ax.axis('off')
+
+            # ========== 保留colorbar复用逻辑（修复显示范围缩小） ==========
+            if hasattr(self, 'sinogram_cbar'):
+                self.sinogram_ax.figure.canvas.draw_idle()
+                self.sinogram_cbar.update_normal(im)
+            else:
+                self.sinogram_cbar = self.sinogram_fig.colorbar(
+                    im,
+                    ax=self.sinogram_ax,
+                    shrink=0.8,
+                    pad=0.1  # 固定colorbar与绘图区间距
+                )
+                self.sinogram_cbar.set_label('投影积分值',
+                                             fontsize=self.font_size_base,
+                                             fontfamily=self.font_family)
+
+            # ========== 清晰的坐标轴标注（匹配你的需求） ==========
+            self.sinogram_ax.set_xlabel('投影角度（°）',  # X轴：角度
+                                        fontsize=self.font_size_base,
+                                        fontfamily=self.font_family)
+            self.sinogram_ax.set_ylabel('探测器坐标（归一化）',  # Y轴：探测器
+                                        fontsize=self.font_size_base,
+                                        fontfamily=self.font_family)
+            # 设置刻度（匹配坐标轴范围）
+            self.sinogram_ax.set_xticks([0, 45, 90, 135, 180])  # 角度刻度
+            self.sinogram_ax.set_yticks([-1, -0.5, 0, 0.5, 1])  # 探测器刻度
+
+            # 标题明确维度对应关系
+            self.sinogram_ax.set_title(
+                f"CT投影数据（正弦图）\n维度：X轴{num_angles}角度 × Y轴{num_detectors}探测器",
+                fontsize=self.font_size_large,
+                fontfamily=self.font_family
+            )
+
+            # ========== 保留布局刷新（修复显示范围缩小） ==========
+            self.sinogram_fig.tight_layout()  # 强制刷新布局，避免累积偏移
             self.sinogram_canvas.draw()
 
     def _run_reconstruction(self):
