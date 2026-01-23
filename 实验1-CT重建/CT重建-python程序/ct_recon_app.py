@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from PIL import Image, ImageTk
 import os
+from scipy.ndimage import rotate
 
 from ct_rec_algorithms.direct_backprojection import run_direct_reconstruction
 from ct_rec_algorithms.fourier_backprojection import fourier_backprojection
@@ -15,18 +16,18 @@ from ct_rec_algorithms.filtered_backprojection import filtered_backprojection
 # ---------------------- 1. 新增：Shepp-Logan 生成模块（对齐标准实现） ----------------------
 def shepp_logan_phantom(size=256):
     """生成Shepp-Logan幻影图像（完全对齐generate_shepp_logan_phantom.py标准）"""
-    # 椭圆参数: [x0, y0, a, b, angle_deg, rho]（与标准文件完全一致）
+    # 椭圆参数: [x0, y0, a, b, angle_deg, rho]（与标准不同，自行修改了参数rho，也就是相对灰度大小，增强了对比度）
     ellipses = [
-        [0.0, 0.0, 0.92, 0.69, 90, 2.0],  # 主椭圆（头部）
-        [0.0, -0.0184, 0.874, 0.6624, 90, -0.98],  # 颅骨
-        [0.22, 0.0, 0.31, 0.11, 72, -0.02],  # 左脑室
-        [-0.22, 0.0, 0.41, 0.16, 108, -0.02],  # 右脑室
-        [0.0, 0.35, 0.25, 0.21, 90, 0.01],  # 脑干
-        [0.0, 0.1, 0.046, 0.046, 0, 0.01],  # 小椭圆
-        [0.0, -0.1, 0.046, 0.046, 0, 0.01],  # 小椭圆
-        [-0.08, -0.605, 0.046, 0.023, 0, 0.01],  # 眼球
-        [0.0, -0.605, 0.023, 0.023, 0, 0.01],  # 眼球
-        [0.06, -0.605, 0.046, 0.023, 90, 0.01]  # 眼球
+        [0.0, 0.0, 0.92, 0.69, 90, 4.0],  # 主椭圆（头部）
+        [0.0, -0.0184, 0.874, 0.6624, 90, -1.98],  # 颅骨
+        [0.22, 0.0, 0.31, 0.11, 72, -1.2],  # 左脑室
+        [-0.22, 0.0, 0.41, 0.16, 108, -1.2],  # 右脑室
+        [0.0, 0.35, 0.25, 0.21, 90, 1.1],  # 脑干
+        [0.0, 0.1, 0.046, 0.046, 0, 1.1],  # 小椭圆
+        [0.0, -0.1, 0.046, 0.046, 0, 1.1],  # 小椭圆
+        [-0.08, -0.605, 0.046, 0.023, 0, 1.1],  # 眼球
+        [0.0, -0.605, 0.023, 0.023, 0, 1.1],  # 眼球
+        [0.06, -0.605, 0.046, 0.023, 90, 1.1]  # 眼球
     ]
 
     # 创建归一化坐标网格 [-1, 1]（与标准文件完全一致）
@@ -53,6 +54,14 @@ def shepp_logan_phantom(size=256):
 
         # 设置灰度值（与标准文件完全一致）
         phantom[ellipse_mask] += gray_val
+
+    # ========== 关键修改1：归一化Shepp-Logan幻影到0~255范围 ==========
+    phantom_min = np.min(phantom)
+    phantom_max = np.max(phantom)
+    # 避免除零（若数据全为0则不处理）
+    if phantom_max - phantom_min > 1e-6:
+        phantom = (phantom - phantom_min) / (phantom_max - phantom_min) * 255.0
+    phantom = phantom.astype(np.float32)
 
     return phantom
 
@@ -96,15 +105,14 @@ RECONSTRUCTION_ALGORITHMS = {
 # ---------------------- 3. 模拟CT扫描模块 ----------------------
 def simulate_ct_scan(image, num_angles=180):
     """
-    对输入图像模拟CT扫描，生成投影数据（正弦图）和投影角度
+    对输入图像模拟CT扫描，生成物理意义正确的正弦图（投影数据）
     :param image: 输入图像，numpy数组，shape=(H, W)
     :param num_angles: 投影角度数量（默认180）
-    :return: sinogram（投影数据）、angles（投影角度，弧度）
+    :return: sinogram（投影数据，shape=(num_angles, 探测器数)）、angles（投影角度，弧度）
     """
     # 统一图像尺寸为正方形（CT扫描常规处理）
     size = max(image.shape)
     if image.shape[0] != size or image.shape[1] != size:
-        # 补零到正方形
         pad_h = (size - image.shape[0]) // 2
         pad_w = (size - image.shape[1]) // 2
         image = np.pad(image, ((pad_h, size - image.shape[0] - pad_h),
@@ -113,29 +121,32 @@ def simulate_ct_scan(image, num_angles=180):
 
     # 生成投影角度（0~π弧度，对应0~180度）
     angles = np.linspace(0, np.pi, num_angles, endpoint=False, dtype=np.float32)
-    sinogram = np.zeros((size, num_angles), dtype=np.float32)
+    sinogram = np.zeros((num_angles, size), dtype=np.float32)  # (角度数, 探测器数)
 
-    # 创建归一化坐标网格
-    x = np.linspace(-1, 1, size)
-    y = np.linspace(-1, 1, size)
-    X, Y = np.meshgrid(x, y)
+    # 生成探测器坐标（对应图像的列/行，模拟CT探测器阵列）
+    detector_coords = np.linspace(-size / 2, size / 2, size)  # 物理坐标（像素单位）
 
-    # 逐角度计算投影（沿旋转后的X轴积分）
     for i, angle in enumerate(angles):
-        # 旋转坐标
-        angle_rad = angle
-        X_rot = X * np.cos(angle_rad) + Y * np.sin(angle_rad)
-        Y_rot = -X * np.sin(angle_rad) + Y * np.cos(angle_rad)
+        # 步骤1：将图像旋转对应角度（模拟X射线沿该角度投影）
+        rotated_img = rotate(image, angle * 180 / np.pi, reshape=False, mode='constant')
 
-        # 沿X轴积分（投影）
-        for j in range(size):
-            mask = (Y_rot[:, j] >= -1) & (Y_rot[:, j] <= 1)
-            if np.any(mask):
-                sinogram[j, i] = np.sum(image[mask, j])
+        # 步骤2：沿垂直方向（探测器方向）积分，得到该角度的投影值
+        # 积分逻辑：对旋转后的图像逐列求和（沿Y轴积分）
+        projection = np.sum(rotated_img, axis=0)  # 列求和，shape=(size,)
 
-    # 转置为(角度数, 探测器数)（匹配算法输入要求）
-    sinogram = sinogram.T
+        # 步骤3：将投影值赋值给当前角度的正弦图
+        sinogram[i] = projection
+
+    # ========== 关键修改2：调整标准化逻辑，适配归一化后的Shepp-Logan数据 ==========
+    # 原逻辑会重复归一化，改为仅当数据最大值>255时才缩放
+    if np.max(sinogram) > 255.0:
+        sinogram = sinogram / size * 255
+    else:
+        # 确保数据范围在0~255内
+        sinogram = np.clip(sinogram, 0, 255)
+
     return sinogram, angles
+
 
 # ---------------------- 4. 主程序界面类（关键修改：对齐显示标准） ----------------------
 class CTReconstructionApp:
@@ -157,8 +168,8 @@ class CTReconstructionApp:
         self.sl_display_config = {
             "cmap": 'gray',
             "extent": [-1, 1, -1, 1],
-            "vmin": 0.95,
-            "vmax": 1.25,
+            "vmin": 0,  # ========== 关键修改3：适配归一化后的显示范围 ==========
+            "vmax": 255,  # ========== 关键修改3：适配归一化后的显示范围 ==========
             "origin": 'lower',
             "alpha": 1.0
         }
@@ -194,15 +205,11 @@ class CTReconstructionApp:
         self.file_path_var = tk.StringVar(value="未选择文件")
         ttk.Button(row1_frame, text="选择原始图像/投影数据",
                    command=self._select_file).pack(side=tk.LEFT, padx=5)
-        ttk.Label(row1_frame, textvariable=self.file_path_var).pack(side=tk.LEFT, padx=5)
+        ttk.Label(row1_frame, textvariable=self.file_path_var).pack(side=tk.LEFT, padx=(5,20))
 
         # Shepp-Logan生成相关控件
-        ttk.Label(row1_frame, text="生成Shepp-Logan数据：").pack(side=tk.LEFT, padx=10)
-        self.sl_data_type = tk.StringVar(value="幻影图像")
-        ttk.Radiobutton(row1_frame, text="幻影图像", variable=self.sl_data_type,
-                        value="幻影图像").pack(side=tk.LEFT)
-        ttk.Radiobutton(row1_frame, text="正弦图(投影数据)", variable=self.sl_data_type,
-                        value="正弦图").pack(side=tk.LEFT)
+        ttk.Label(row1_frame, text="生成Shepp-Logan数据：").pack(side=tk.LEFT, padx=(50,5))
+
 
         self.sl_size_var = tk.StringVar(value="256")
         ttk.Label(row1_frame, text="图像尺寸：").pack(side=tk.LEFT, padx=5)
@@ -218,7 +225,8 @@ class CTReconstructionApp:
         # 算法选择下拉框（仅保留direct_reconstruction，可扩展其他算法）
         ttk.Label(row2_frame, text="选择重建算法：").pack(side=tk.LEFT, padx=5)
         self.algorithm_var = tk.StringVar()
-        self.algorithm_list = ["直接反投影重建","傅里叶反投影重建","反投影滤波重建","滤波反投影重建"]  # 可扩展：["直接反投影重建",...]
+        self.algorithm_list = ["直接反投影重建", "傅里叶反投影重建", "反投影滤波重建",
+                               "滤波反投影重建"]  # 可扩展：["直接反投影重建",...]
         algorithm_combobox = ttk.Combobox(row2_frame, textvariable=self.algorithm_var,
                                           values=self.algorithm_list, state="readonly")
         algorithm_combobox.pack(side=tk.LEFT, padx=5)
@@ -226,7 +234,7 @@ class CTReconstructionApp:
             algorithm_combobox.current(0)
 
         # 新增：投影角度数配置（仅对图像数据生效）
-        ttk.Label(row2_frame, text="投影角度数：").pack(side=tk.LEFT, padx=10)
+        ttk.Label(row2_frame, text="投影角度数：").pack(side=tk.LEFT, padx=(50,10))
         self.angle_num_var = tk.StringVar(value="180")
         ttk.Entry(row2_frame, textvariable=self.angle_num_var, width=10).pack(side=tk.LEFT)
 
@@ -300,39 +308,34 @@ class CTReconstructionApp:
 
     # ---------------------- 新增：Shepp-Logan生成方法 ----------------------
     def _generate_shepp_logan(self):
-        """生成Shepp-Logan数据，并标记数据类型"""
+        """生成Shepp-Logan幻影图像（仅保留幻影图像生成功能）"""
         try:
+            # 获取并验证尺寸参数
             size = int(self.sl_size_var.get())
             if size <= 0 or size > 1024:
                 raise ValueError("尺寸必须为1-1024之间的整数")
 
+            # 设置等待光标并更新界面
             self.root.config(cursor="wait")
             self.root.update()
 
-            if self.sl_data_type.get() == "幻影图像":
-                self.raw_data = shepp_logan_phantom(size)
-                self.data_type = "shepp_logan_image"
-                self.data_source = f"生成的Shepp-Logan幻影图像（{size}x{size}）"
-            else:
-                # 先生成幻影图像，再生成正弦图
-                phantom = shepp_logan_phantom(size)
-                self.sinogram_data, self.angles_data = simulate_ct_scan(phantom, num_angles=180)
-                self.raw_data = self.sinogram_data
-                self.data_type = "shepp_logan_sinogram"
-                self.data_source = f"生成的Shepp-Logan正弦图（{size}x{size}）"
+            # 仅生成Shepp-Logan幻影图像
+            self.raw_data = shepp_logan_phantom(size)
+            self.data_type = "shepp_logan_image"
+            self.data_source = f"生成的Shepp-Logan幻影图像（{size}x{size}）"
 
+            # 恢复正常光标
             self.root.config(cursor="")
 
-            # 更新显示
+            # 更新界面显示
             self.file_path_var.set(self.data_source)
-            self._display_raw_data()
-            if self.data_type == "shepp_logan_sinogram":
-                self._display_sinogram_data()
+            self._display_raw_data()  # 左侧显示幻影图像
             messagebox.showinfo("成功", f"{self.data_source}生成完成！")
 
         except ValueError as e:
             messagebox.showerror("错误", f"输入参数无效：{str(e)}")
         except Exception as e:
+            # 确保异常时恢复正常光标
             self.root.config(cursor="")
             messagebox.showerror("错误", f"生成数据失败：{str(e)}")
 
@@ -397,7 +400,7 @@ class CTReconstructionApp:
             # 图像类型数据显示
             if self.data_type in ["image", "shepp_logan_image"]:
                 if self.data_type == "shepp_logan_image":
-                    # Shepp-Logan图像用标准参数显示
+                    # Shepp-Logan图像用标准参数显示（已适配归一化后范围）
                     self.raw_ax.imshow(
                         self.raw_data,
                         cmap=self.sl_display_config["cmap"],
@@ -439,12 +442,12 @@ class CTReconstructionApp:
     def _run_reconstruction(self):
         """执行重建算法（核心：根据数据类型自动处理）"""
         if self.raw_data is None:
-            messagebox.warning("警告", "请先加载或生成原始数据/图像！")
+            messagebox.showwarning("警告", f"请先加载或生成原始数据/图像！")
             return
 
         selected_algorithm = self.algorithm_var.get()
         if not selected_algorithm:
-            messagebox.warning("警告", "请选择重建算法！")
+            messagebox.showwarning("警告", "请选择重建算法！")
             return
 
         try:
@@ -468,7 +471,7 @@ class CTReconstructionApp:
             if self.sinogram_data is None or self.angles_data is None:
                 raise ValueError("投影数据缺失！无法执行重建")
 
-            # 步骤3：调用重建算法（以direct_reconstruction为例）
+            # 步骤3：调用重建算法（扩展傅里叶反投影调用逻辑）
             if selected_algorithm == "直接反投影重建":
                 # 自定义参数（可根据需要调整）
                 custom_params = {
@@ -480,6 +483,12 @@ class CTReconstructionApp:
                 self.recon_result, status, msg = run_direct_reconstruction(
                     self.sinogram_data, self.angles_data, custom_params
                 )
+            # ========== 关键修改4：实现傅里叶反投影重建的调用逻辑 ==========
+            elif selected_algorithm == "傅里叶反投影重建":
+                # 调用傅里叶反投影算法（根据实际接口调整参数）
+                self.recon_result = fourier_backprojection(self.sinogram_data, self.angles_data)
+                status = "success"
+                msg = "傅里叶反投影重建完成"
             else:
                 # 可扩展其他算法调用逻辑
                 raise NotImplementedError(f"暂未实现{selected_algorithm}的调用逻辑")
@@ -488,6 +497,13 @@ class CTReconstructionApp:
 
             # 步骤4：判断重建结果并显示
             if status == "success":
+                # ========== 关键修改5：重建结果归一化显示 ==========
+                # 确保重建结果在0~255范围显示
+                if self.recon_result is not None:
+                    recon_min = np.min(self.recon_result)
+                    recon_max = np.max(self.recon_result)
+                    if recon_max - recon_min > 1e-6:
+                        self.recon_result = (self.recon_result - recon_min) / (recon_max - recon_min) * 255.0
                 self._display_recon_result()
                 messagebox.showinfo("成功", f"{selected_algorithm} 重建完成！")
             else:
