@@ -105,7 +105,7 @@ def direct_backprojection_recon(sinogram, angles, params=None):
 
 
 # -------------------------- 主程序调用接口（保持兼容） --------------------------
-def run_direct_reconstruction(sinogram, angles, params=None):
+def direct_backprojection(sinogram, angles, params=None):
     """
     主程序调用的统一接口（固定函数名+返回格式）
     :param sinogram: 投影数据（numpy数组）

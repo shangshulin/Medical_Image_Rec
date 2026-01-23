@@ -7,7 +7,7 @@ from PIL import Image, ImageTk
 import os
 from scipy.ndimage import rotate
 
-from ct_rec_algorithms.direct_backprojection import run_direct_reconstruction
+from ct_rec_algorithms.direct_backprojection import direct_backprojection
 from ct_rec_algorithms.fourier_backprojection import fourier_backprojection
 from ct_rec_algorithms.backprojection_filter import backprojection_filter
 from ct_rec_algorithms.filtered_backprojection import filtered_backprojection
@@ -95,7 +95,7 @@ def generate_sinogram(phantom, angles=180):
 # ---------------------- 2. 算法模块 ----------------------
 # 算法字典：更新为四种指定算法（键为显示名称，值为对应函数）
 RECONSTRUCTION_ALGORITHMS = {
-    "直接反投影重建": run_direct_reconstruction,
+    "直接反投影重建": direct_backprojection,
     "傅里叶反投影重建": fourier_backprojection,
     "反投影滤波重建": backprojection_filter,
     "滤波反投影重建": filtered_backprojection
@@ -222,7 +222,7 @@ class CTReconstructionApp:
         row2_frame = ttk.Frame(control_frame)
         row2_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        # 算法选择下拉框（仅保留direct_reconstruction，可扩展其他算法）
+        # 算法选择下拉框
         ttk.Label(row2_frame, text="选择重建算法：").pack(side=tk.LEFT, padx=5)
         self.algorithm_var = tk.StringVar()
         self.algorithm_list = ["直接反投影重建", "傅里叶反投影重建", "反投影滤波重建",
@@ -480,7 +480,7 @@ class CTReconstructionApp:
                     "interpolation": "linear"
                 }
                 # 调用算法接口
-                self.recon_result, status, msg = run_direct_reconstruction(
+                self.recon_result, status, msg = direct_backprojection(
                     self.sinogram_data, self.angles_data, custom_params
                 )
             # ========== 关键修改4：实现傅里叶反投影重建的调用逻辑 ==========
