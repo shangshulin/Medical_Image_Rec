@@ -483,10 +483,25 @@ class CTReconstructionApp:
                 self.recon_result, status, msg = direct_backprojection(
                     self.sinogram_data, self.angles_data, custom_params
                 )
-            # ========== 关键修改4：实现傅里叶反投影重建的调用逻辑 ==========
             elif selected_algorithm == "傅里叶反投影重建":
-                # 调用傅里叶反投影算法（根据实际接口调整参数）
-                self.recon_result = fourier_backprojection(self.sinogram_data, self.angles_data)
+                # 步骤1：维度适配（主程序sinogram是(角度数, 探测器数)，算法要求(探测器数, 角度数)）
+                sinogram_adapted = self.sinogram_data.T  # 转置维度
+
+                # 步骤2：弧度转角度（算法要求角度制）
+                angles_deg = np.rad2deg(self.angles_data)
+
+                # 步骤3：确定重建图像尺寸（与原始图像/探测器数一致）
+                if self.data_type in ["image", "shepp_logan_image"]:
+                    image_size = self.raw_data.shape[0]  # 用原始图像尺寸
+                else:
+                    image_size = self.sinogram_data.shape[1]  # 用探测器数量作为图像尺寸
+
+                # 步骤4：调用傅里叶反投影算法（参数完整传递）
+                self.recon_result = fourier_backprojection(
+                    sinogram=sinogram_adapted,
+                    angles_deg=angles_deg,
+                    image_size=image_size
+                )
                 status = "success"
                 msg = "傅里叶反投影重建完成"
             else:

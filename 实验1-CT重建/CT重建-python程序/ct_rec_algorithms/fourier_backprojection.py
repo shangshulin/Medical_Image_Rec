@@ -2,100 +2,128 @@ import numpy as np
 from scipy.interpolate import griddata
 
 
-def fourier_backprojection(sinogram, angles):
+def fourier_backprojection(sinogram, angles_deg, image_size):
     """
     傅里叶反投影重建算法（Fourier Backprojection）
     核心步骤：
-    1. 对每个角度的投影做1D FFT + fftshift
+    1. 对每个角度的投影做1D FFT，并fftshift到中心
     2. 构建频域极坐标点 (fx, fy) 和对应的频域值 F
-    3. 笛卡尔网格插值
+    3. 笛卡尔网格插值（线性插值）
     4. ifftshift + 2D IFFT 得到重建图像
 
     参数:
-        sinogram: np.ndarray, 投影数据（正弦图），shape=(num_angles, num_detectors)
-        angles: np.ndarray, 投影角度（弧度），shape=(num_angles,)
+        sinogram: np.ndarray, 投影数据（正弦图），shape=(探测器数量, 投影角度数量)
+        angles_deg: np.ndarray, 投影角度（角度制），shape=(投影角度数量,)
+        image_size: int, 重建图像的尺寸（N×N）
 
     返回:
-        recon_image: np.ndarray, 重建后的图像，shape=(num_detectors, num_detectors)
+        recon_image: np.ndarray, 重建后的图像，shape=(image_size, image_size)
     """
     # ========== 步骤0：参数初始化与预处理 ==========
-    num_angles = len(angles)  # 投影角度数
-    num_detectors = sinogram.shape[1]  # 探测器数量（图像尺寸）
-    recon_size = num_detectors  # 重建图像尺寸（与探测器数一致）
-
-    # 归一化探测器坐标（频域X轴，对应投影方向）
-    # 探测器位置范围：[-num_detectors/2, num_detectors/2]
-    detector_coords = np.linspace(-num_detectors / 2, num_detectors / 2, num_detectors, dtype=np.float32)
+    N_d, num_angles = sinogram.shape  # 探测器数量、投影角度数
+    angles_rad = np.deg2rad(angles_deg)  # 角度转弧度
 
     # ========== 步骤1：对每个角度的投影做1D FFT + fftshift ==========
-    # 初始化频域数据存储
-    fft_projections = np.zeros((num_angles, num_detectors), dtype=np.complex64)
+    # 沿探测器维度（axis=0）做FFT，先ifftshift再FFT最后fftshift（对齐fourier_reconstruction逻辑）
+    F_proj = np.fft.fftshift(
+        np.fft.fft(np.fft.ifftshift(sinogram, axes=0), axis=0),
+        axes=0
+    )
 
+    # ========== 步骤2：构建频域极坐标点 (fx, fy) 和对应的F值 ==========
+    # 计算归一化频率（[-0.5, 0.5)，与fourier_reconstruction一致）
+    freqs = np.fft.fftfreq(N_d)
+    freqs_shifted = np.fft.fftshift(freqs)  # 零频率移到中心
+
+    # 遍历所有角度，生成极坐标对应的笛卡尔频域点
+    fx_list, fy_list, F_list = [], [], []
     for i in range(num_angles):
-        # 单个角度的投影数据
-        proj = sinogram[i].astype(np.float32)
+        theta = angles_rad[i]
+        # 极坐标转笛卡尔坐标（径向频率×cos/sin(投影角度)）
+        fx = freqs_shifted * np.cos(theta)
+        fy = freqs_shifted * np.sin(theta)
+        F_vals = F_proj[:, i]
 
-        # 1D FFT（沿探测器方向）
-        fft_proj = np.fft.fft(proj)
+        fx_list.append(fx)
+        fy_list.append(fy)
+        F_list.append(F_vals)
 
-        # fftshift：将零频率分量移到中心
-        fft_proj_shifted = np.fft.fftshift(fft_proj)
-
-        # 存储频域结果
-        fft_projections[i] = fft_proj_shifted
-
-    # ========== 步骤2：构建频域极坐标点 (fx, fy) 和对应的频域值 F ==========
-    # 极坐标参数：
-    # - 径向频率 r (对应探测器频域坐标)
-    # - 角度 theta (投影角度 + 90度，因为投影是沿垂直于角度方向)
-    r = detector_coords  # 径向频率（与探测器坐标一致）
-    theta = angles + np.pi / 2  # 投影角度旋转90度（投影方向与角度垂直）
-
-    # 生成极坐标网格 (r_grid, theta_grid)
-    r_grid, theta_grid = np.meshgrid(r, theta, indexing='xy')
-
-    # 极坐标转笛卡尔坐标 (fx, fy)
-    fx = r_grid * np.cos(theta_grid)
-    fy = r_grid * np.sin(theta_grid)
-
-    # 展平用于插值
-    fx_flat = fx.flatten()
-    fy_flat = fy.flatten()
-    F_flat = fft_projections.flatten()  # 频域值
+    # 拼接所有频域点和对应值
+    fx_all = np.concatenate(fx_list)
+    fy_all = np.concatenate(fy_list)
+    F_all = np.concatenate(F_list)
 
     # ========== 步骤3：创建规则笛卡尔网格并插值 ==========
-    # 定义笛卡尔网格范围（与重建图像尺寸匹配）
-    # 网格中心点为(0,0)，范围覆盖所有极坐标点
-    cartesian_coords = np.linspace(-num_detectors / 2, num_detectors / 2, recon_size, dtype=np.float32)
-    fx_cart, fy_cart = np.meshgrid(cartesian_coords, cartesian_coords, indexing='xy')
+    # 构建与重建图像尺寸匹配的归一化频域网格（[-0.5, 0.5) × [-0.5, 0.5)）
+    x = np.linspace(-0.5, 0.5, image_size, endpoint=False)
+    y = np.linspace(-0.5, 0.5, image_size, endpoint=False)
+    X, Y = np.meshgrid(x, y)
 
-    # 插值：将极坐标频域值映射到笛卡尔网格
-    # 采用线性插值，超出范围的点设为0（避免NaN）
-    F_cart = griddata(
-        points=np.column_stack((fx_flat, fy_flat)),
-        values=F_flat,
-        xi=(fx_cart, fy_cart),
+    # 线性插值：极坐标频域点 → 笛卡尔频域网格
+    points = np.column_stack((fx_all, fy_all))
+    values = F_all
+    F_2d = griddata(
+        points=points,
+        values=values,
+        xi=(X, Y),
         method='linear',
         fill_value=0.0
-    ).astype(np.complex64)
+    )
 
     # ========== 步骤4：ifftshift + 2D IFFT 得到重建图像 ==========
-    # ifftshift：将零频率分量移回角落（与fftshift逆操作）
-    F_cart_unshifted = np.fft.ifftshift(F_cart)
+    # 逆移位后做2D IFFT，取实部（虚部为数值误差）
+    f_recon = np.fft.fftshift(
+        np.fft.ifft2(np.fft.ifftshift(F_2d))
+    )
+    recon_image = np.real(f_recon)
 
-    # 2D IFFT：频域转空域
-    recon_image = np.fft.ifft2(F_cart_unshifted)
-
-    # 取实部（虚部是数值误差，应忽略）
-    recon_image = np.real(recon_image)
-
-    # ========== 后处理：数值归一化与调整 ==========
-    # 移除均值偏移（背景归零）
-    recon_image = recon_image - np.min(recon_image)
-    # 归一化到0~255范围（与主程序显示标准对齐）
-    if np.max(recon_image) > 1e-6:
-        recon_image = recon_image / np.max(recon_image) * 255.0
-    # 转换为float32（匹配主程序数据类型）
-    recon_image = recon_image.astype(np.float32)
+    # ========== 后处理：归一化（对齐fourier_reconstruction的归一化逻辑） ==========
+    recon_min, recon_max = recon_image.min(), recon_image.max()
+    recon_image = (recon_image - recon_min) / (recon_max - recon_min + 1e-8)  # 加小值避免除零
 
     return recon_image
+
+
+# 可选：添加测试主函数（对齐fourier_reconstruction的测试逻辑）
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    from phantominator import shepp_logan
+    from fourier_reconstruction import forward_projection
+
+    # 配置参数
+    configs = {
+        "N": 180,          # 图像大小
+        "N_d": 180,        # 探测器数量
+        "result_path": "./image_result"
+    }
+
+    # 生成投影数据
+    theta = np.arange(0, 180, 1)  # 0~179度，步长1度
+    P = forward_projection(theta, configs["N"], configs["N_d"])
+
+    # 傅里叶反投影重建
+    recon = fourier_backprojection(P, theta, image_size=configs["N"])
+
+    # 显示结果
+    plt.figure(figsize=(15, 4))
+    # 原始Shepp-Logan幻影
+    I = shepp_logan(configs["N"])
+    plt.subplot(1, 3, 1)
+    plt.imshow(I, cmap='gray')
+    plt.title('Original Phantom')
+    plt.axis('off')
+    # 正弦图
+    plt.subplot(1, 3, 2)
+    plt.imshow(P, cmap='gray', aspect='auto')
+    plt.title('Sinogram')
+    plt.xlabel('Angle')
+    plt.ylabel('Detector')
+    # 重建结果
+    plt.subplot(1, 3, 3)
+    plt.imshow(recon, cmap='gray')
+    plt.title('Fourier Backprojection')
+    plt.axis('off')
+
+    plt.tight_layout()
+    plt.savefig(configs["result_path"])
+    plt.show()
