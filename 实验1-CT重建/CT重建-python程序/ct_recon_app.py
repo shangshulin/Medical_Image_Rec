@@ -6,11 +6,16 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from PIL import Image, ImageTk
 import os
 
+from ct_rec_algorithms.direct_backprojection import run_direct_reconstruction
+from ct_rec_algorithms.fourier_backprojection import fourier_backprojection
+from ct_rec_algorithms.backprojection_filter import backprojection_filter
+from ct_rec_algorithms.filtered_backprojection import filtered_backprojection
 
-# ---------------------- 1. 新增：Shepp-Logan 生成模块 ----------------------
+
+# ---------------------- 1. 新增：Shepp-Logan 生成模块（对齐标准实现） ----------------------
 def shepp_logan_phantom(size=256):
-    """生成Shepp-Logan幻影图像（标准CT测试图像）"""
-    # 椭圆参数: [x0, y0, a, b, angle_deg, rho]
+    """生成Shepp-Logan幻影图像（完全对齐generate_shepp_logan_phantom.py标准）"""
+    # 椭圆参数: [x0, y0, a, b, angle_deg, rho]（与标准文件完全一致）
     ellipses = [
         [0.0, 0.0, 0.92, 0.69, 90, 2.0],  # 主椭圆（头部）
         [0.0, -0.0184, 0.874, 0.6624, 90, -0.98],  # 颅骨
@@ -24,8 +29,9 @@ def shepp_logan_phantom(size=256):
         [0.06, -0.605, 0.046, 0.023, 90, 0.01]  # 眼球
     ]
 
-    # 创建归一化坐标网格 [-1, 1]
+    # 创建归一化坐标网格 [-1, 1]（与标准文件完全一致）
     y, x = np.ogrid[-1:1:size * 1j, -1:1:size * 1j]
+
     phantom = np.zeros((size, size), dtype=np.float32)
 
     for item in ellipses:
@@ -34,16 +40,18 @@ def shepp_logan_phantom(size=256):
         cos_a = np.cos(angle)
         sin_a = np.sin(angle)
 
-        # 平移
+        # 平移（与标准文件完全一致）
         x_shift = x - x0
         y_shift = y - y0
 
-        # 逆旋转
+        # 逆旋转（与标准文件完全一致）
         xr = cos_a * x_shift + sin_a * y_shift
         yr = -sin_a * x_shift + cos_a * y_shift
 
-        # 椭圆方程
+        # 椭圆方程（与标准文件完全一致）
         ellipse_mask = (xr / a) ** 2 + (yr / b) ** 2 <= 1.0
+
+        # 设置灰度值（与标准文件完全一致）
         phantom[ellipse_mask] += gray_val
 
     return phantom
@@ -75,42 +83,66 @@ def generate_sinogram(phantom, angles=180):
     return sinogram
 
 
-# ---------------------- 2. 算法模块（更新为四种算法） ----------------------
-def direct_backprojection(raw_data):
-    """直接反投影算法 - 模拟实现，替换为你的实际代码"""
-    reconstructed = raw_data  # 模拟逻辑，替换为真实算法
-    return reconstructed
-
-def fourier_backprojection(raw_data):
-    """傅里叶反投影算法 - 模拟实现，替换为你的实际代码"""
-    reconstructed = np.flipud(raw_data)  # 模拟逻辑，替换为真实算法
-    return reconstructed
-
-def backprojection_filter(raw_data):
-    """反投影滤波算法 - 模拟实现，替换为你的实际代码"""
-    reconstructed = np.fliplr(raw_data)  # 模拟逻辑，替换为真实算法
-    return reconstructed
-
-def filtered_backprojection(raw_data):
-    """滤波反投影算法 - 模拟实现，替换为你的实际代码"""
-    reconstructed = np.rot90(raw_data)  # 模拟逻辑，替换为真实算法
-    return reconstructed
-
+# ---------------------- 2. 算法模块 ----------------------
 # 算法字典：更新为四种指定算法（键为显示名称，值为对应函数）
 RECONSTRUCTION_ALGORITHMS = {
-    "直接反投影重建": direct_backprojection,
+    "直接反投影重建": run_direct_reconstruction,
     "傅里叶反投影重建": fourier_backprojection,
     "反投影滤波重建": backprojection_filter,
     "滤波反投影重建": filtered_backprojection
 }
 
 
-# ---------------------- 3. 主程序界面类（关键修改） ----------------------
+# ---------------------- 3. 模拟CT扫描模块 ----------------------
+def simulate_ct_scan(image, num_angles=180):
+    """
+    对输入图像模拟CT扫描，生成投影数据（正弦图）和投影角度
+    :param image: 输入图像，numpy数组，shape=(H, W)
+    :param num_angles: 投影角度数量（默认180）
+    :return: sinogram（投影数据）、angles（投影角度，弧度）
+    """
+    # 统一图像尺寸为正方形（CT扫描常规处理）
+    size = max(image.shape)
+    if image.shape[0] != size or image.shape[1] != size:
+        # 补零到正方形
+        pad_h = (size - image.shape[0]) // 2
+        pad_w = (size - image.shape[1]) // 2
+        image = np.pad(image, ((pad_h, size - image.shape[0] - pad_h),
+                               (pad_w, size - image.shape[1] - pad_w)),
+                       mode='constant', constant_values=0)
+
+    # 生成投影角度（0~π弧度，对应0~180度）
+    angles = np.linspace(0, np.pi, num_angles, endpoint=False, dtype=np.float32)
+    sinogram = np.zeros((size, num_angles), dtype=np.float32)
+
+    # 创建归一化坐标网格
+    x = np.linspace(-1, 1, size)
+    y = np.linspace(-1, 1, size)
+    X, Y = np.meshgrid(x, y)
+
+    # 逐角度计算投影（沿旋转后的X轴积分）
+    for i, angle in enumerate(angles):
+        # 旋转坐标
+        angle_rad = angle
+        X_rot = X * np.cos(angle_rad) + Y * np.sin(angle_rad)
+        Y_rot = -X * np.sin(angle_rad) + Y * np.cos(angle_rad)
+
+        # 沿X轴积分（投影）
+        for j in range(size):
+            mask = (Y_rot[:, j] >= -1) & (Y_rot[:, j] <= 1)
+            if np.any(mask):
+                sinogram[j, i] = np.sum(image[mask, j])
+
+    # 转置为(角度数, 探测器数)（匹配算法输入要求）
+    sinogram = sinogram.T
+    return sinogram, angles
+
+# ---------------------- 4. 主程序界面类（关键修改：对齐显示标准） ----------------------
 class CTReconstructionApp:
     def __init__(self, root):
         self.root = root
         self.root.title("CT图像重建系统")
-        self.root.geometry("1900x1200")
+        self.root.geometry("2500x1200")
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
 
         self.font_size_base = 20  # 基础字体（按钮、标签），改这个数字调整大小
@@ -120,6 +152,21 @@ class CTReconstructionApp:
         # 定义字体配置（同时支持ttk和tk原生控件）
         self.font_base = (self.font_family, self.font_size_base)
         self.font_large = (self.font_family, self.font_size_large)
+
+        # Shepp-Logan显示参数（完全对齐generate_shepp_logan_phantom.py）
+        self.sl_display_config = {
+            "cmap": 'gray',
+            "extent": [-1, 1, -1, 1],
+            "vmin": 0.95,
+            "vmax": 1.25,
+            "origin": 'lower',
+            "alpha": 1.0
+        }
+
+        # 新增：数据类型标记 + 中间变量（存储投影数据/角度）
+        self.data_type = None  # 'image'/'sinogram'/'shepp_logan_image'/'shepp_logan_sinogram'
+        self.sinogram_data = None  # 投影数据
+        self.angles_data = None  # 投影角度
 
         self._setup_style()  # 配置ttk控件样式
         # 新增：配置tkinter原生控件的默认字体
@@ -134,7 +181,7 @@ class CTReconstructionApp:
         self._create_widgets()
 
     def _create_widgets(self):
-        """创建所有界面组件（新增Shepp-Logan生成相关控件）"""
+        """创建界面组件（新增投影角度数配置）"""
         # 1. 顶部控制面板
         control_frame = ttk.LabelFrame(self.root, text="控制面板")
         control_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -145,11 +192,11 @@ class CTReconstructionApp:
 
         # 选择文件按钮
         self.file_path_var = tk.StringVar(value="未选择文件")
-        ttk.Button(row1_frame, text="选择原始图像/数据",
+        ttk.Button(row1_frame, text="选择原始图像/投影数据",
                    command=self._select_file).pack(side=tk.LEFT, padx=5)
         ttk.Label(row1_frame, textvariable=self.file_path_var).pack(side=tk.LEFT, padx=5)
 
-        # 新增：Shepp-Logan生成相关控件
+        # Shepp-Logan生成相关控件
         ttk.Label(row1_frame, text="生成Shepp-Logan数据：").pack(side=tk.LEFT, padx=10)
         self.sl_data_type = tk.StringVar(value="幻影图像")
         ttk.Radiobutton(row1_frame, text="幻影图像", variable=self.sl_data_type,
@@ -164,31 +211,40 @@ class CTReconstructionApp:
         ttk.Button(row1_frame, text="生成数据",
                    command=self._generate_shepp_logan).pack(side=tk.LEFT, padx=5)
 
-        # 第二行：算法选择 + 重建按钮
+        # 第二行：算法选择 + 投影角度数配置 + 重建按钮
         row2_frame = ttk.Frame(control_frame)
         row2_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        # 算法选择下拉框
+        # 算法选择下拉框（仅保留direct_reconstruction，可扩展其他算法）
         ttk.Label(row2_frame, text="选择重建算法：").pack(side=tk.LEFT, padx=5)
         self.algorithm_var = tk.StringVar()
+        self.algorithm_list = ["直接反投影重建","傅里叶反投影重建","反投影滤波重建","滤波反投影重建"]  # 可扩展：["直接反投影重建",...]
         algorithm_combobox = ttk.Combobox(row2_frame, textvariable=self.algorithm_var,
-                                          values=list(RECONSTRUCTION_ALGORITHMS.keys()),
-                                          state="readonly")
+                                          values=self.algorithm_list, state="readonly")
         algorithm_combobox.pack(side=tk.LEFT, padx=5)
-        if RECONSTRUCTION_ALGORITHMS:
+        if self.algorithm_list:
             algorithm_combobox.current(0)
+
+        # 新增：投影角度数配置（仅对图像数据生效）
+        ttk.Label(row2_frame, text="投影角度数：").pack(side=tk.LEFT, padx=10)
+        self.angle_num_var = tk.StringVar(value="180")
+        ttk.Entry(row2_frame, textvariable=self.angle_num_var, width=10).pack(side=tk.LEFT)
 
         # 重建按钮
         ttk.Button(row2_frame, text="开始重建",
-                   command=self._run_reconstruction).pack(side=tk.LEFT, padx=5)
+                   command=self._run_reconstruction).pack(side=tk.LEFT, padx=20)
 
-        # 2. 图像显示区域（保持不变）
+        # 2. 图像显示区域（新增投影数据显示区）
         display_frame = ttk.Frame(self.root)
         display_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        # 原始图像显示区
+        # 原始数据/图像显示区
         raw_frame = ttk.LabelFrame(display_frame, text="原始数据/图像")
         raw_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # 投影数据显示区（新增）
+        sinogram_frame = ttk.LabelFrame(display_frame, text="CT投影数据（正弦图）")
+        sinogram_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # 重建结果显示区
         recon_frame = ttk.LabelFrame(display_frame, text="重建结果")
@@ -197,19 +253,19 @@ class CTReconstructionApp:
         # 创建matplotlib绘图区域
         # 原始图像画布
         self.raw_fig, self.raw_ax = plt.subplots(figsize=(5, 5), dpi=100)
-        # ========== 关键修改：添加fontsize和fontfamily ==========
-        self.raw_ax.set_title("未加载数据",
-                              fontsize=self.font_size_large,  # 用全局定义的大号字体大小
-                              fontfamily=self.font_family)  # 用全局定义的字体族（SimHei）
+        self.raw_ax.set_title("未加载数据", fontsize=self.font_size_large, fontfamily=self.font_family)
         self.raw_canvas = FigureCanvasTkAgg(self.raw_fig, master=raw_frame)
         self.raw_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
+        # 投影数据画布（新增）
+        self.sinogram_fig, self.sinogram_ax = plt.subplots(figsize=(5, 5), dpi=100)
+        self.sinogram_ax.set_title("未生成投影数据", fontsize=self.font_size_large, fontfamily=self.font_family)
+        self.sinogram_canvas = FigureCanvasTkAgg(self.sinogram_fig, master=sinogram_frame)
+        self.sinogram_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
         # 重建结果画布
         self.recon_fig, self.recon_ax = plt.subplots(figsize=(5, 5), dpi=100)
-        # ========== 关键修改：添加fontsize和fontfamily ==========
-        self.recon_ax.set_title("未进行重建",
-                                fontsize=self.font_size_large,  # 全局大号字体大小
-                                fontfamily=self.font_family)  # 全局字体族
+        self.recon_ax.set_title("未进行重建", fontsize=self.font_size_large, fontfamily=self.font_family)
         self.recon_canvas = FigureCanvasTkAgg(self.recon_fig, master=recon_frame)
         self.recon_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
@@ -231,6 +287,7 @@ class CTReconstructionApp:
             font=self.font_large,  # 框架标题用大号字体
             padding=5  # 内边距，让标题不拥挤
         )
+
     def _on_closing(self):
         """窗口关闭时的清理操作"""
         # 1. 关闭所有Matplotlib的绘图窗口/释放资源
@@ -240,34 +297,38 @@ class CTReconstructionApp:
         # 3. 强制退出Python进程（确保彻底终止）
         import sys
         sys.exit()
+
     # ---------------------- 新增：Shepp-Logan生成方法 ----------------------
     def _generate_shepp_logan(self):
-        """生成Shepp-Logan数据（幻影图像或正弦图）"""
+        """生成Shepp-Logan数据，并标记数据类型"""
         try:
-            # 获取用户输入的尺寸
             size = int(self.sl_size_var.get())
             if size <= 0 or size > 1024:
                 raise ValueError("尺寸必须为1-1024之间的整数")
 
-            # 根据选择生成对应数据
             self.root.config(cursor="wait")
             self.root.update()
 
             if self.sl_data_type.get() == "幻影图像":
                 self.raw_data = shepp_logan_phantom(size)
-                self.data_source = "生成的Shepp-Logan幻影图像"
+                self.data_type = "shepp_logan_image"
+                self.data_source = f"生成的Shepp-Logan幻影图像（{size}x{size}）"
             else:
                 # 先生成幻影图像，再生成正弦图
                 phantom = shepp_logan_phantom(size)
-                self.raw_data = generate_sinogram(phantom)
-                self.data_source = "生成的Shepp-Logan正弦图"
+                self.sinogram_data, self.angles_data = simulate_ct_scan(phantom, num_angles=180)
+                self.raw_data = self.sinogram_data
+                self.data_type = "shepp_logan_sinogram"
+                self.data_source = f"生成的Shepp-Logan正弦图（{size}x{size}）"
 
             self.root.config(cursor="")
 
-            # 更新显示和状态
+            # 更新显示
             self.file_path_var.set(self.data_source)
             self._display_raw_data()
-            messagebox.showinfo("成功", f"{self.data_source}生成完成！尺寸：{size}x{size}")
+            if self.data_type == "shepp_logan_sinogram":
+                self._display_sinogram_data()
+            messagebox.showinfo("成功", f"{self.data_source}生成完成！")
 
         except ValueError as e:
             messagebox.showerror("错误", f"输入参数无效：{str(e)}")
@@ -275,14 +336,14 @@ class CTReconstructionApp:
             self.root.config(cursor="")
             messagebox.showerror("错误", f"生成数据失败：{str(e)}")
 
-    # ---------------------- 原有方法（保持不变） ----------------------
+    # ---------------------- 原有方法（关键修改：对齐Shepp-Logan显示标准） ----------------------
     def _select_file(self):
-        """选择原始图像/数据文件"""
+        """选择原始图像/投影数据文件，并判断数据类型"""
         file_path = filedialog.askopenfilename(
             title="选择CT原始数据/图像",
             filetypes=[
                 ("图像文件", "*.png *.jpg *.jpeg *.tif *.tiff *.bmp"),
-                ("数据文件", "*.npy *.txt *.csv"),
+                ("投影数据文件", "*.npy *.txt *.csv"),
                 ("所有文件", "*.*")
             ]
         )
@@ -290,38 +351,93 @@ class CTReconstructionApp:
         if file_path:
             self.file_path_var.set(os.path.basename(file_path))
             try:
-                if file_path.endswith(('.npy', '.txt', '.csv')):
-                    if file_path.endswith('.npy'):
-                        self.raw_data = np.load(file_path)
-                    else:
-                        self.raw_data = np.loadtxt(file_path)
-                else:
+                # 判断文件类型：图像文件→标记为image；数据文件→标记为sinogram
+                if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp')):
+                    # 加载图像
                     img = Image.open(file_path).convert('L')
-                    self.raw_data = np.array(img)
+                    self.raw_data = np.array(img, dtype=np.float32)
+                    self.data_type = "image"
+                    self.data_source = f"上传图像：{os.path.basename(file_path)}"
+                else:
+                    # 加载投影数据（需确保是(sinogram, angles)格式，或单独sinogram）
+                    if file_path.endswith('.npy'):
+                        loaded_data = np.load(file_path, allow_pickle=True)
+                        if isinstance(loaded_data, tuple) and len(loaded_data) == 2:
+                            # 若为(sinogram, angles)元组
+                            self.sinogram_data, self.angles_data = loaded_data
+                        else:
+                            # 若为单独sinogram，自动生成角度
+                            self.sinogram_data = loaded_data
+                            self.angles_data = np.linspace(0, np.pi, self.sinogram_data.shape[0], endpoint=False)
+                    else:
+                        # 文本文件仅加载sinogram
+                        self.sinogram_data = np.loadtxt(file_path, dtype=np.float32)
+                        self.angles_data = np.linspace(0, np.pi, self.sinogram_data.shape[0], endpoint=False)
+                    self.raw_data = self.sinogram_data  # 原始数据显示投影数据
+                    self.data_type = "sinogram"
+                    self.data_source = f"上传投影数据：{os.path.basename(file_path)}"
 
-                self.data_source = "上传文件"
+                # 显示原始数据
                 self._display_raw_data()
-                messagebox.showinfo("成功", "原始数据/图像加载成功！")
+                # 若为投影数据，同步显示投影数据
+                if self.data_type == "sinogram":
+                    self._display_sinogram_data()
+                messagebox.showinfo("成功", f"{self.data_source}加载成功！")
 
             except Exception as e:
                 messagebox.showerror("错误", f"加载文件失败：{str(e)}")
                 self.raw_data = None
+                self.data_type = None
 
     def _display_raw_data(self):
+        """显示原始数据"""
         if self.raw_data is not None:
             self.raw_ax.clear()
-            self.raw_ax.imshow(self.raw_data, cmap='gray')
-            # 关键修改：指定字体大小（用self.font_size_large）
-            self.raw_ax.set_title(
-                f"{self.data_source} (尺寸: {self.raw_data.shape})",
-                fontsize=self.font_size_large,
-                fontfamily=self.font_family
-            )
+
+            # 图像类型数据显示
+            if self.data_type in ["image", "shepp_logan_image"]:
+                if self.data_type == "shepp_logan_image":
+                    # Shepp-Logan图像用标准参数显示
+                    self.raw_ax.imshow(
+                        self.raw_data,
+                        cmap=self.sl_display_config["cmap"],
+                        extent=self.sl_display_config["extent"],
+                        vmin=self.sl_display_config["vmin"],
+                        vmax=self.sl_display_config["vmax"],
+                        origin=self.sl_display_config["origin"],
+                        alpha=self.sl_display_config["alpha"]
+                    )
+                else:
+                    # 普通图像用默认灰度显示
+                    self.raw_ax.imshow(self.raw_data, cmap='gray')
+                self.raw_ax.set_title(
+                    f"{self.data_source} (尺寸: {self.raw_data.shape})",
+                    fontsize=self.font_size_large, fontfamily=self.font_family
+                )
+            # 投影数据类型显示
+            else:
+                self.raw_ax.imshow(self.raw_data, cmap='gray')
+                self.raw_ax.set_title(
+                    f"{self.data_source} (角度数: {self.raw_data.shape[0]}, 探测器数: {self.raw_data.shape[1]})",
+                    fontsize=self.font_size_large, fontfamily=self.font_family
+                )
             self.raw_ax.axis('off')
             self.raw_canvas.draw()
 
+    def _display_sinogram_data(self):
+        """显示投影数据（正弦图）"""
+        if self.sinogram_data is not None:
+            self.sinogram_ax.clear()
+            self.sinogram_ax.imshow(self.sinogram_data.T, cmap='gray')  # 转置后显示更直观
+            self.sinogram_ax.set_title(
+                f"CT投影数据 (角度数: {len(self.angles_data)}, 探测器数: {self.sinogram_data.shape[1]})",
+                fontsize=self.font_size_large, fontfamily=self.font_family
+            )
+            self.sinogram_ax.axis('off')
+            self.sinogram_canvas.draw()
+
     def _run_reconstruction(self):
-        """执行重建算法"""
+        """执行重建算法（核心：根据数据类型自动处理）"""
         if self.raw_data is None:
             messagebox.warning("警告", "请先加载或生成原始数据/图像！")
             return
@@ -332,25 +448,80 @@ class CTReconstructionApp:
             return
 
         try:
-            recon_func = RECONSTRUCTION_ALGORITHMS[selected_algorithm]
-
             self.root.config(cursor="wait")
             self.root.update()
-            self.recon_result = recon_func(self.raw_data)
+
+            # 步骤1：根据数据类型生成投影数据（若需要）
+            if self.data_type in ["image", "shepp_logan_image"]:
+                # 图像类型→先模拟CT扫描生成投影数据
+                num_angles = int(self.angle_num_var.get())
+                if num_angles <= 0 or num_angles > 360:
+                    raise ValueError("投影角度数必须为1-360之间的整数")
+
+                # 模拟CT扫描
+                self.sinogram_data, self.angles_data = simulate_ct_scan(self.raw_data, num_angles=num_angles)
+                # 显示投影数据
+                self._display_sinogram_data()
+                messagebox.showinfo("提示", f"已对图像完成CT模拟扫描（{num_angles}个投影角度）")
+
+            # 步骤2：检查投影数据是否存在
+            if self.sinogram_data is None or self.angles_data is None:
+                raise ValueError("投影数据缺失！无法执行重建")
+
+            # 步骤3：调用重建算法（以direct_reconstruction为例）
+            if selected_algorithm == "直接反投影重建":
+                # 自定义参数（可根据需要调整）
+                custom_params = {
+                    "filter_type": "shepp-logan",
+                    "sigma": 0.8,
+                    "interpolation": "linear"
+                }
+                # 调用算法接口
+                self.recon_result, status, msg = run_direct_reconstruction(
+                    self.sinogram_data, self.angles_data, custom_params
+                )
+            else:
+                # 可扩展其他算法调用逻辑
+                raise NotImplementedError(f"暂未实现{selected_algorithm}的调用逻辑")
+
             self.root.config(cursor="")
 
-            self._display_recon_result()
-            messagebox.showinfo("成功", f"{selected_algorithm} 重建完成！")
+            # 步骤4：判断重建结果并显示
+            if status == "success":
+                self._display_recon_result()
+                messagebox.showinfo("成功", f"{selected_algorithm} 重建完成！")
+            else:
+                raise ValueError(f"算法执行失败：{msg}")
 
+        except ValueError as e:
+            self.root.config(cursor="")
+            messagebox.showerror("错误", f"参数错误：{str(e)}")
+        except NotImplementedError as e:
+            self.root.config(cursor="")
+            messagebox.showerror("错误", str(e))
         except Exception as e:
             self.root.config(cursor="")
             messagebox.showerror("错误", f"重建失败：{str(e)}")
 
     def _display_recon_result(self):
+        """显示重建结果"""
         if self.recon_result is not None:
             self.recon_ax.clear()
-            self.recon_ax.imshow(self.recon_result, cmap='gray')
-            # 关键修改：指定字体大小
+
+            # 如果是Shepp-Logan幻影重建结果，沿用相同的显示参数
+            if self.data_source and "Shepp-Logan" in self.data_source:
+                self.recon_ax.imshow(
+                    self.recon_result,
+                    cmap=self.sl_display_config["cmap"],
+                    extent=self.sl_display_config["extent"],
+                    vmin=self.sl_display_config["vmin"],
+                    vmax=self.sl_display_config["vmax"],
+                    origin=self.sl_display_config["origin"],
+                    alpha=self.sl_display_config["alpha"]
+                )
+            else:
+                self.recon_ax.imshow(self.recon_result, cmap='gray')
+
             self.recon_ax.set_title(
                 f"重建结果 (尺寸: {self.recon_result.shape})",
                 fontsize=self.font_size_large,
@@ -359,9 +530,10 @@ class CTReconstructionApp:
             self.recon_ax.axis('off')
             self.recon_canvas.draw()
 
+
 # ---------------------- 4. 程序入口 ----------------------
 if __name__ == "__main__":
-    # 确保中文显示正常
+    # 确保中文显示正常（与generate_shepp_logan_phantom.py对齐）
     plt.rcParams["font.family"] = ["SimHei"]
     plt.rcParams['axes.unicode_minus'] = False
 
