@@ -37,9 +37,6 @@ def forward_projection(theta_proj, N, N_d):
             P_theta[ind] += rho[k2] * (2 * ae[k2] * be[k2] * np.sqrt(temp[ind])) / a
         P[:, k1] = P_theta
 
-    P_min = np.min(P)
-    P_max = np.max(P)
-    P = (P - P_min) / (P_max - P_min + 1e-8)
     return P
 
 
@@ -60,11 +57,7 @@ def shepp_logan_filter(size):
     n = np.arange(-size // 2, size // 2)
     filter = np.zeros(size)
     for i, freq in enumerate(n):
-        abs_freq = np.abs(freq)
-        if abs_freq == 0:
-            filter[i] = 0
-        else:
-            filter[i] = -1 / (np.pi ** 2 * abs_freq ** 2) * np.sin(np.pi * abs_freq) / abs_freq
+        filter[i] = -2 / (np.pi ** 2 * (4 * freq ** 2 - 1))
     return filter
 
 
