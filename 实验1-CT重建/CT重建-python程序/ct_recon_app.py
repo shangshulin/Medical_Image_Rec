@@ -230,11 +230,26 @@ class CTReconstructionApp:
         algorithm_combobox = ttk.Combobox(row2_frame, textvariable=self.algorithm_var,
                                           values=self.algorithm_list, state="readonly")
         algorithm_combobox.pack(side=tk.LEFT, padx=5)
+        # 绑定算法选择事件，动态更新滤波器选项
+        algorithm_combobox.bind("<<ComboboxSelected>>", self._on_algorithm_change)
         if self.algorithm_list:
             algorithm_combobox.current(0)
 
+        # 新增：滤波器选择下拉框
+        ttk.Label(row2_frame, text="滤波器：").pack(side=tk.LEFT, padx=(20, 5))
+        self.filter_type_var = tk.StringVar()
+        # 初始默认全列表，后续由 _on_algorithm_change 控制
+        self.filter_type_list = ["ram_lak", "shepp_logan", "cosine", "hamming"]
+        self.filter_combobox = ttk.Combobox(row2_frame, textvariable=self.filter_type_var,
+                                       values=self.filter_type_list, state="disabled", width=12) # 初始禁用
+        self.filter_combobox.pack(side=tk.LEFT, padx=5)
+        self.filter_combobox.current(0)
+
+        # 初始化时触发一次状态更新
+        self._on_algorithm_change(None)
+
         # 新增：投影角度数配置（仅对图像数据生效）
-        ttk.Label(row2_frame, text="投影角度数：").pack(side=tk.LEFT, padx=(50,10))
+        ttk.Label(row2_frame, text="投影角度数：").pack(side=tk.LEFT, padx=(20,10))
         self.angle_num_var = tk.StringVar(value="180")
         ttk.Entry(row2_frame, textvariable=self.angle_num_var, width=10).pack(side=tk.LEFT)
 
@@ -305,6 +320,28 @@ class CTReconstructionApp:
         # 3. 强制退出Python进程（确保彻底终止）
         import sys
         sys.exit()
+
+    def _on_algorithm_change(self, event):
+        """算法选择改变时的回调函数，动态控制滤波器下拉框"""
+        selected_algo = self.algorithm_var.get()
+        
+        if selected_algo == "滤波反投影重建":
+            # FBP: 仅支持 ram_lak 和 shepp_logan
+            self.filter_combobox.config(state="readonly")
+            self.filter_combobox['values'] = ["ram_lak", "shepp_logan"]
+            # 如果当前选择不在允许列表中，重置为第一个
+            if self.filter_type_var.get() not in ["ram_lak", "shepp_logan"]:
+                self.filter_combobox.current(0)
+                
+        elif selected_algo == "反投影滤波重建":
+            # BPF: 支持所有4种滤波器
+            self.filter_combobox.config(state="readonly")
+            self.filter_combobox['values'] = ["ram_lak", "shepp_logan", "cosine", "hamming"]
+            
+        else:
+            # 直接反投影 和 傅里叶反投影: 不需要滤波器
+            self.filter_combobox.config(state="disabled")
+            # 可选：清空或保留当前显示均可，这里保留显示但不生效
 
     # ---------------------- 新增：Shepp-Logan生成方法 ----------------------
     def _generate_shepp_logan(self):
@@ -522,6 +559,9 @@ class CTReconstructionApp:
                 raise ValueError("投影数据缺失！无法执行重建")
 
             # 步骤3：调用重建算法（扩展傅里叶反投影调用逻辑）
+            # 获取当前选择的滤波器类型
+            current_filter = self.filter_type_var.get()
+
             if selected_algorithm == "直接反投影重建":
                 # 自定义参数（可根据需要调整）
                 custom_params = {
@@ -568,10 +608,27 @@ class CTReconstructionApp:
                     sinogram=self.sinogram_data,
                     angles=self.angles_data,
                     image_size=image_size,
-                    filter_type='ram_lak'  # 可选: 'shepp_logan', 'cosine', 'hamming'
+                    filter_type=current_filter  # 使用选择的滤波器
                 )
                 status = "success"
-                msg = "反投影滤波重建完成"
+                msg = f"反投影滤波重建完成 ({current_filter})"
+            elif selected_algorithm == "滤波反投影重建":
+                # 步骤1：确定重建图像尺寸
+                if self.data_type in ["image", "shepp_logan_image"]:
+                    image_size = self.raw_data.shape[0]
+                else:
+                    image_size = self.sinogram_data.shape[1]
+
+                # 步骤2：调用滤波反投影算法
+                # filtered_backprojection 已实现自动维度适配
+                self.recon_result = filtered_backprojection(
+                    sinogram=self.sinogram_data,
+                    angles=self.angles_data,
+                    image_size=image_size,
+                    filter_type=current_filter  # 使用选择的滤波器
+                )
+                status = "success"
+                msg = f"滤波反投影重建完成 ({current_filter})"
             else:
                 # 可扩展其他算法调用逻辑
                 raise NotImplementedError(f"暂未实现{selected_algorithm}的调用逻辑")
