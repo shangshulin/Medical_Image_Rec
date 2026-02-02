@@ -554,6 +554,24 @@ class CTReconstructionApp:
                 )
                 status = "success"
                 msg = "傅里叶反投影重建完成"
+            elif selected_algorithm == "反投影滤波重建":
+                # 步骤1：确定重建图像尺寸
+                if self.data_type in ["image", "shepp_logan_image"]:
+                    image_size = self.raw_data.shape[0]
+                else:
+                    image_size = self.sinogram_data.shape[1]
+
+                # 步骤2：调用反投影滤波算法
+                # sinogram_data: (angles, detectors), angles_data: (radians)
+                # backprojection_filter 已实现自动维度适配
+                self.recon_result = backprojection_filter(
+                    sinogram=self.sinogram_data,
+                    angles=self.angles_data,
+                    image_size=image_size,
+                    filter_type='ram_lak'  # 可选: 'shepp_logan', 'cosine', 'hamming'
+                )
+                status = "success"
+                msg = "反投影滤波重建完成"
             else:
                 # 可扩展其他算法调用逻辑
                 raise NotImplementedError(f"暂未实现{selected_algorithm}的调用逻辑")
