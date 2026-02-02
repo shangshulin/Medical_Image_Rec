@@ -88,7 +88,7 @@ def fourier_backprojection(sinogram, angles_deg, image_size):
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     from phantominator import shepp_logan
-    from fourier_reconstruction import forward_projection
+    from standalone_program.fourier_reconstruction import forward_projection
 
     # 配置参数
     configs = {
