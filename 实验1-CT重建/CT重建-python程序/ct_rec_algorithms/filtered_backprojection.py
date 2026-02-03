@@ -28,20 +28,20 @@ def shepp_logan_filter(size):
     return filter_kernel
 
 
-def apply_filter(projection, filter_type='ram_lak'):
+def apply_filter(projection, filter_type='R-L'):
     """
     对单角度投影数据进行滤波 (一维卷积)
     :param projection: 1D array, 单个角度的投影数据
-    :param filter_type: 'ram_lak' or 'shepp_logan'
+    :param filter_type: 'R-L' or 'S-L'
     :return: 滤波后的投影数据
     """
     size = len(projection)
-    if filter_type == 'ram_lak':
+    if filter_type == 'R-L':
         kernel = ram_lak_filter(size)
-    elif filter_type == 'shepp_logan':
+    elif filter_type == 'S-L':
         kernel = shepp_logan_filter(size)
     else:
-        # 默认使用 Ram-Lak
+        # 默认使用 Ram-Lak (R-L)
         kernel = ram_lak_filter(size)
 
     # 使用 'same' 模式保持尺寸一致
@@ -93,7 +93,7 @@ def backprojection_rad(projection, angles_rad, image_size):
     return recon
 
 
-def filtered_backprojection(sinogram, angles, image_size=None, filter_type='ram_lak'):
+def filtered_backprojection(sinogram, angles, image_size=None, filter_type='R-L'):
     """
     滤波反投影重建 (FBP) 主接口
     

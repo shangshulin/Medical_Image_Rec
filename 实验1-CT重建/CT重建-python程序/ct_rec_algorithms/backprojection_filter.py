@@ -40,11 +40,11 @@ def backprojection_unfiltered(P, angles_rad, image_size):
     return recon * (np.pi / num_angles)
 
 
-def frequency_domain_processing(image, filter_type='ram_lak'):
+def frequency_domain_processing(image, filter_type='R-L'):
     """
     频域滤波处理 (BPF第二步)
     :param image: 反投影后的图像
-    :param filter_type: 滤波器类型 ('ram_lak', 'shepp_logan', 'cosine', 'hamming')
+    :param filter_type: 滤波器类型 ('R-L', 'S-L', 'cosine', 'hamming')
     :return: 滤波后的图像
     """
     rows, cols = image.shape
@@ -64,9 +64,9 @@ def frequency_domain_processing(image, filter_type='ram_lak'):
     rho = np.sqrt(U**2 + V**2)
     
     # 3. 设计2D滤波器
-    if filter_type == 'ram_lak':
+    if filter_type == 'R-L':
         H = rho
-    elif filter_type == 'shepp_logan':
+    elif filter_type == 'S-L':
         # rho=0时 sinc(0)=1, rho*sinc(rho)=0
         H = rho * np.sinc(rho) 
     elif filter_type == 'cosine':
@@ -85,7 +85,7 @@ def frequency_domain_processing(image, filter_type='ram_lak'):
     return recon
 
 
-def backprojection_filter(sinogram, angles, image_size=None, filter_type='ram_lak'):
+def backprojection_filter(sinogram, angles, image_size=None, filter_type='R-L'):
     """
     反投影滤波重建 (BPF) 主接口
     

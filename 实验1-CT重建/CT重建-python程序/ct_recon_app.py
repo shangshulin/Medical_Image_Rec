@@ -96,7 +96,7 @@ def generate_sinogram(phantom, angles=180):
 # 算法字典：更新为四种指定算法（键为显示名称，值为对应函数）
 RECONSTRUCTION_ALGORITHMS = {
     "直接反投影重建": direct_backprojection,
-    "傅里叶反投影重建": fourier_backprojection,
+    "傅里叶重建": fourier_backprojection,
     "反投影滤波重建": backprojection_filter,
     "滤波反投影重建": filtered_backprojection
 }
@@ -225,7 +225,7 @@ class CTReconstructionApp:
         # 算法选择下拉框
         ttk.Label(row2_frame, text="选择重建算法：").pack(side=tk.LEFT, padx=5)
         self.algorithm_var = tk.StringVar()
-        self.algorithm_list = ["直接反投影重建", "傅里叶反投影重建", "反投影滤波重建",
+        self.algorithm_list = ["直接反投影重建", "傅里叶重建", "反投影滤波重建",
                                "滤波反投影重建"]  # 可扩展：["直接反投影重建",...]
         algorithm_combobox = ttk.Combobox(row2_frame, textvariable=self.algorithm_var,
                                           values=self.algorithm_list, state="readonly")
@@ -239,7 +239,7 @@ class CTReconstructionApp:
         ttk.Label(row2_frame, text="滤波器：").pack(side=tk.LEFT, padx=(20, 5))
         self.filter_type_var = tk.StringVar()
         # 初始默认全列表，后续由 _on_algorithm_change 控制
-        self.filter_type_list = ["ram_lak", "shepp_logan", "cosine", "hamming"]
+        self.filter_type_list = ["R-L", "S-L", "cosine", "hamming"]
         self.filter_combobox = ttk.Combobox(row2_frame, textvariable=self.filter_type_var,
                                        values=self.filter_type_list, state="disabled", width=12) # 初始禁用
         self.filter_combobox.pack(side=tk.LEFT, padx=5)
@@ -326,20 +326,20 @@ class CTReconstructionApp:
         selected_algo = self.algorithm_var.get()
         
         if selected_algo == "滤波反投影重建":
-            # FBP: 仅支持 ram_lak 和 shepp_logan
+            # FBP: 仅支持 R-L 和 S-L
             self.filter_combobox.config(state="readonly")
-            self.filter_combobox['values'] = ["ram_lak", "shepp_logan"]
+            self.filter_combobox['values'] = ["R-L", "S-L"]
             # 如果当前选择不在允许列表中，重置为第一个
-            if self.filter_type_var.get() not in ["ram_lak", "shepp_logan"]:
+            if self.filter_type_var.get() not in ["R-L", "S-L"]:
                 self.filter_combobox.current(0)
                 
         elif selected_algo == "反投影滤波重建":
             # BPF: 支持所有4种滤波器
             self.filter_combobox.config(state="readonly")
-            self.filter_combobox['values'] = ["ram_lak", "shepp_logan", "cosine", "hamming"]
+            self.filter_combobox['values'] = ["R-L", "S-L", "cosine", "hamming"]
             
         else:
-            # 直接反投影 和 傅里叶反投影: 不需要滤波器
+            # 直接反投影 和 傅里叶重建: 不需要滤波器
             self.filter_combobox.config(state="disabled")
             # 可选：清空或保留当前显示均可，这里保留显示但不生效
 
@@ -558,7 +558,7 @@ class CTReconstructionApp:
             if self.sinogram_data is None or self.angles_data is None:
                 raise ValueError("投影数据缺失！无法执行重建")
 
-            # 步骤3：调用重建算法（扩展傅里叶反投影调用逻辑）
+            # 步骤3：调用重建算法
             # 获取当前选择的滤波器类型
             current_filter = self.filter_type_var.get()
 
@@ -573,7 +573,7 @@ class CTReconstructionApp:
                 self.recon_result, status, msg = direct_backprojection(
                     self.sinogram_data, self.angles_data, custom_params
                 )
-            elif selected_algorithm == "傅里叶反投影重建":
+            elif selected_algorithm == "傅里叶重建":
                 # 步骤1：维度适配（主程序sinogram是(角度数, 探测器数)，算法要求(探测器数, 角度数)）
                 sinogram_adapted = self.sinogram_data.T  # 转置维度
 
@@ -586,14 +586,14 @@ class CTReconstructionApp:
                 else:
                     image_size = self.sinogram_data.shape[1]  # 用探测器数量作为图像尺寸
 
-                # 步骤4：调用傅里叶反投影算法（参数完整传递）
+                # 步骤4：调用傅里叶算法（参数完整传递）
                 self.recon_result = fourier_backprojection(
                     sinogram=sinogram_adapted,
                     angles_deg=angles_deg,
                     image_size=image_size
                 )
                 status = "success"
-                msg = "傅里叶反投影重建完成"
+                msg = "傅里叶重建完成"
             elif selected_algorithm == "反投影滤波重建":
                 # 步骤1：确定重建图像尺寸
                 if self.data_type in ["image", "shepp_logan_image"]:
