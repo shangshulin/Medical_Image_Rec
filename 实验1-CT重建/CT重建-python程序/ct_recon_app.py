@@ -645,7 +645,14 @@ class CTReconstructionApp:
                     if recon_max - recon_min > 1e-6:
                         self.recon_result = (self.recon_result - recon_min) / (recon_max - recon_min) * 255.0
                 self._display_recon_result()
-                messagebox.showinfo("成功", f"{selected_algorithm} 重建完成！")
+                 # 动态拼接弹窗提示文本：区分是否显示滤波器
+                if selected_algorithm in ["直接反投影重建", "傅里叶重建"]:
+                    # 直接反投影/傅里叶重建：不显示滤波器
+                    success_msg = f"{selected_algorithm}完成！"
+                else:
+                    # 反投影滤波/滤波反投影重建：显示滤波器
+                    success_msg = f"{selected_algorithm}({current_filter})完成！"
+                messagebox.showinfo("成功", success_msg)
             else:
                 raise ValueError(f"算法执行失败：{msg}")
 
