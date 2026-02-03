@@ -1,9 +1,9 @@
 # filtered_backprojection.py - 滤波反投影算法
 import numpy as np
 
-def ram_lak_filter(size):
+def r_l_filter(size):
     """
-    生成 Ram-Lak 滤波器 (Ramp filter)
+    生成 R-L 滤波器
     """
     n = np.arange(-size // 2, size // 2)
     filter_kernel = np.zeros(size)
@@ -17,9 +17,9 @@ def ram_lak_filter(size):
     return filter_kernel
 
 
-def shepp_logan_filter(size):
+def s_l_filter(size):
     """
-    生成 Shepp-Logan 滤波器
+    生成 S-L 滤波器
     """
     n = np.arange(-size // 2, size // 2)
     filter_kernel = np.zeros(size)
@@ -37,12 +37,12 @@ def apply_filter(projection, filter_type='R-L'):
     """
     size = len(projection)
     if filter_type == 'R-L':
-        kernel = ram_lak_filter(size)
+        kernel = r_l_filter(size)
     elif filter_type == 'S-L':
-        kernel = shepp_logan_filter(size)
+        kernel = s_l_filter(size)
     else:
-        # 默认使用 Ram-Lak (R-L)
-        kernel = ram_lak_filter(size)
+        # 默认使用 R-L
+        kernel = r_l_filter(size)
 
     # 使用 'same' 模式保持尺寸一致
     filtered = np.convolve(projection, kernel, mode='same')
@@ -107,7 +107,7 @@ def filtered_backprojection(sinogram, angles, image_size=None, filter_type='R-L'
                      函数会自动根据 angles 长度进行适配。
     :param angles: 投影角度 (弧度)
     :param image_size: 重建图像尺寸 (int)。若为None，则默认为探测器数量。
-    :param filter_type: 滤波器类型 ('ram_lak' 或 'shepp_logan')
+    :param filter_type: 滤波器类型 ('R-L' 或 'S-L')
     :return: 重建图像 (numpy 2D array)
     """
     

@@ -61,11 +61,11 @@ def shepp_logan_filter(size):
     return filter
 
 
-def apply_filter(projection, filter_type='ram_lak'):
+def apply_filter(projection, filter_type='R-L'):
     size = len(projection)
-    if filter_type == 'ram_lak':
+    if filter_type == 'R-L':
         kernel = ram_lak_filter(size)
-    elif filter_type == 'shepp_logan':
+    elif filter_type == 'S-L':
         kernel = shepp_logan_filter(size)
     else:
         kernel = ram_lak_filter(size)
@@ -98,7 +98,7 @@ def backprojection(projection, angles, image_size):
     return recon
 
 
-def fbp_reconstruction(P, angles_deg, image_size, filter_type='ram_lak'):
+def fbp_reconstruction(P, angles_deg, image_size, filter_type='R-L'):
     angles_rad = np.deg2rad(angles_deg)
     N_d, num_angles = P.shape
 
@@ -182,23 +182,23 @@ if __name__ == "__main__":
     print("Generating projections...")
     P_raw = forward_projection(theta, configs["N"], configs["N_d"])
 
-    print("Reconstructing with Ram-Lak filter...")
-    recon_ram_lak, P_ram_lak = fbp_reconstruction(P_raw, theta, configs["N"], filter_type='ram_lak')
+    print("Reconstructing with R-L filter...")
+    recon_ram_lak, P_ram_lak = fbp_reconstruction(P_raw, theta, configs["N"], filter_type='R-L')
 
-    print("Reconstructing with Shepp-Logan filter...")
-    recon_shepp_logan, P_shepp_logan = fbp_reconstruction(P_raw, theta, configs["N"], filter_type='shepp_logan')
+    print("Reconstructing with S-L filter...")
+    recon_shepp_logan, P_shepp_logan = fbp_reconstruction(P_raw, theta, configs["N"], filter_type='S-L')
 
     # 准备数据字典
     sinogram_data = {
         'Raw Projection': P_raw,
-        'Ram-Lak Filtered': P_ram_lak,
-        'Shepp-Logan Filtered': P_shepp_logan
+        'R-L Filtered': P_ram_lak,
+        'S-L Filtered': P_shepp_logan
     }
 
     recon_data = {
         'Raw Projection': np.zeros_like(recon_ram_lak), # Raw 对应的重建这里暂无（或者可以是直接反投影），这里简单置零或放一个占位
-        'Ram-Lak Filtered': recon_ram_lak,
-        'Shepp-Logan Filtered': recon_shepp_logan
+        'R-L Filtered': recon_ram_lak,
+        'S-L Filtered': recon_shepp_logan
     }
     
     # 为了让 'Raw Projection' 也有意义，我们可以计算一个未滤波反投影

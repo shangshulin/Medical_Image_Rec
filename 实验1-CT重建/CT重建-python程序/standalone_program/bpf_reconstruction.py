@@ -74,7 +74,7 @@ def backprojection_unfiltered(P, angles_deg, image_size):
     return recon * (np.pi / num_angles)
 
 
-def frequency_domain_processing(image, filter_type='ram_lak'):
+def frequency_domain_processing(image, filter_type='R-L'):
     """
     中间处理模块：频域处理
     """
@@ -95,9 +95,9 @@ def frequency_domain_processing(image, filter_type='ram_lak'):
     rho = np.sqrt(U**2 + V**2)
     
     # 设计滤波器
-    if filter_type == 'ram_lak':
+    if filter_type == 'R-L':
         H = rho
-    elif filter_type == 'shepp_logan':
+    elif filter_type == 'S-L':
         H = rho * np.sinc(rho) 
     elif filter_type == 'cosine':
         H = rho * np.cos(np.pi * rho)
@@ -115,7 +115,7 @@ def frequency_domain_processing(image, filter_type='ram_lak'):
     return recon
 
 
-def bpf_reconstruction(P, angles_deg, image_size, filter_type='ram_lak'):
+def bpf_reconstruction(P, angles_deg, image_size, filter_type='R-L'):
     """
     反投影滤波重建 (Back Projection Filtering) 主流程
     """
@@ -176,7 +176,7 @@ if __name__ == "__main__":
     print("Generating projections...")
     P = forward_projection(theta, configs["N"], configs["N_d"])
     
-    print("Reconstructing with Ram-Lak filter...")
-    recon = bpf_reconstruction(P, theta, configs["N"], filter_type='ram_lak')
+    print("Reconstructing with Ram-Lak filter...")# 计算重建
+    recon = bpf_reconstruction(P, theta, configs["N"], filter_type='R-L')
 
     interactive_display(I, P, recon)

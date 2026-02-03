@@ -565,7 +565,7 @@ class CTReconstructionApp:
             if selected_algorithm == "直接反投影重建":
                 # 自定义参数（可根据需要调整）
                 custom_params = {
-                    "filter_type": "shepp-logan",
+                    "filter_type": "S-L",
                     "sigma": 0.8,
                     "interpolation": "linear"
                 }
