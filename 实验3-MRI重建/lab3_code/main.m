@@ -1,5 +1,6 @@
-%fidname='./origin_data/t1_mse.img.fid';
-fidname='./origin_data/t2_fse.img.fid';
+% fidname='./origin_data/t1_mse.img.fid';
+%fidname='./origin_data/t2_fse.img.fid';
+fidname='./origin_data/PD-SE.img.fid';
 figure('NumberTitle', 'off', 'Name', fidname);
 
 [tau,Data,pp,section] = read_fid(fidname);
