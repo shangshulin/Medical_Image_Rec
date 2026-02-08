@@ -16,18 +16,18 @@ from ct_rec_algorithms.filtered_backprojection import filtered_backprojection
 # ---------------------- 1. 新增：Shepp-Logan 生成模块（对齐标准实现） ----------------------
 def shepp_logan_phantom(size=256):
     """生成Shepp-Logan幻影图像（完全对齐generate_shepp_logan_phantom.py标准）"""
-    # 椭圆参数: [x0, y0, a, b, angle_deg, rho]（与标准不同，自行修改了参数rho，也就是相对灰度大小，增强了对比度）
+    # 椭圆参数: [x0, y0, a, b, angle_deg, rho]（恢复标准物理参数：主体在1.0附近，差异约0.02）
     ellipses = [
-        [0.0, 0.0, 0.92, 0.69, 90, 4.0],  # 主椭圆（头部）
-        [0.0, -0.0184, 0.874, 0.6624, 90, -1.98],  # 颅骨
-        [0.22, 0.0, 0.31, 0.11, 72, -1.2],  # 左脑室
-        [-0.22, 0.0, 0.41, 0.16, 108, -1.2],  # 右脑室
-        [0.0, 0.35, 0.25, 0.21, 90, 1.1],  # 脑干
-        [0.0, 0.1, 0.046, 0.046, 0, 1.1],  # 小椭圆
-        [0.0, -0.1, 0.046, 0.046, 0, 1.1],  # 小椭圆
-        [-0.08, -0.605, 0.046, 0.023, 0, 1.1],  # 眼球
-        [0.0, -0.605, 0.023, 0.023, 0, 1.1],  # 眼球
-        [0.06, -0.605, 0.046, 0.023, 90, 1.1]  # 眼球
+        [0.0, 0.0, 0.92, 0.69, 90, 2.0],           # 主椭圆
+        [0.0, -0.0184, 0.874, 0.6624, 90, -0.98],  # 颅骨
+        [0.22, 0.0, 0.31, 0.11, 72, -0.02],        # 左脑室
+        [-0.22, 0.0, 0.41, 0.16, 108, -0.02],      # 右脑室
+        [0.0, 0.35, 0.25, 0.21, 90, 0.01],         # 脑干
+        [0.0, 0.1, 0.046, 0.046, 0, 0.01],         # 小椭圆
+        [0.0, -0.1, 0.046, 0.046, 0, 0.01],        # 小椭圆
+        [-0.08, -0.605, 0.046, 0.023, 0, 0.01],    # 眼球
+        [0.0, -0.605, 0.023, 0.023, 0, 0.01],      # 眼球
+        [0.06, -0.605, 0.046, 0.023, 90, 0.01]     # 眼球
     ]
 
     # 创建归一化坐标网格 [-1, 1]（与标准文件完全一致）
@@ -55,12 +55,7 @@ def shepp_logan_phantom(size=256):
         # 设置灰度值（与标准文件完全一致）
         phantom[ellipse_mask] += gray_val
 
-    # ========== 关键修改1：归一化Shepp-Logan幻影到0~255范围 ==========
-    phantom_min = np.min(phantom)
-    phantom_max = np.max(phantom)
-    # 避免除零（若数据全为0则不处理）
-    if phantom_max - phantom_min > 1e-6:
-        phantom = (phantom - phantom_min) / (phantom_max - phantom_min) * 255.0
+    # 保持原始物理数值（不进行0-255归一化，以便后续使用Sigmoid非线性增强）
     phantom = phantom.astype(np.float32)
 
     return phantom
@@ -168,16 +163,6 @@ class CTReconstructionApp:
         # 定义字体配置（同时支持ttk和tk原生控件）
         self.font_base = (self.font_family, self.font_size_base)
         self.font_large = (self.font_family, self.font_size_large)
-
-        # Shepp-Logan显示参数（完全对齐generate_shepp_logan_phantom.py）
-        self.sl_display_config = {
-            "cmap": 'gray',
-            "extent": [-1, 1, -1, 1],
-            "vmin": 0,  # ========== 关键修改3：适配归一化后的显示范围 ==========
-            "vmax": 255,  # ========== 关键修改3：适配归一化后的显示范围 ==========
-            "origin": 'lower',
-            "alpha": 1.0
-        }
 
         # 新增：数据类型标记 + 中间变量（存储投影数据/角度）
         self.data_type = None  # 'image'/'sinogram'/'shepp_logan_image'/'shepp_logan_sinogram'
@@ -354,9 +339,8 @@ class CTReconstructionApp:
             self.filter_combobox.config(state="disabled")
             # 可选：清空或保留当前显示均可，这里保留显示但不生效
 
-    # ---------------------- 新增：Shepp-Logan生成方法 ----------------------
     def _generate_shepp_logan(self):
-        """生成Shepp-Logan幻影图像（仅保留幻影图像生成功能）"""
+        """生成Shepp-Logan幻影图像并自动执行非线性增强"""
         try:
             # 获取并验证尺寸参数
             size = int(self.sl_size_var.get())
@@ -367,10 +351,17 @@ class CTReconstructionApp:
             self.root.config(cursor="wait")
             self.root.update()
 
-            # 仅生成Shepp-Logan幻影图像
-            self.raw_data = shepp_logan_phantom(size)
+            # 1. 生成原始Shepp-Logan幻影图像（物理值）
+            phantom_raw = shepp_logan_phantom(size)
+            
+            # 2. 自动执行非线性增强 (内置默认参数: center=1.0, gain=50.0)
+            center = 1.0
+            gain = 50.0
+            z = np.clip(gain * (phantom_raw - center), -50, 50)
+            self.raw_data = 255 / (1 + np.exp(-z))
+            
             self.data_type = "shepp_logan_image"
-            self.data_source = f"生成的Shepp-Logan幻影图像（{size}x{size}）"
+            self.data_source = f"生成的Shepp-Logan幻影图像（{size}x{size}，已内置增强）"
             
             # 清空之前的投影和重建结果，强制重新模拟
             self.sinogram_data = None
@@ -462,29 +453,16 @@ class CTReconstructionApp:
         if self.raw_data is not None:
             self.raw_ax.clear()
 
-            # 图像类型数据显示
+            # 统一使用默认灰度显示
+            self.raw_ax.imshow(self.raw_data, cmap='gray')
+            
             if self.data_type in ["image", "shepp_logan_image"]:
-                if self.data_type == "shepp_logan_image":
-                    # Shepp-Logan图像用标准参数显示（已适配归一化后范围）
-                    self.raw_ax.imshow(
-                        self.raw_data,
-                        cmap=self.sl_display_config["cmap"],
-                        extent=self.sl_display_config["extent"],
-                        vmin=self.sl_display_config["vmin"],
-                        vmax=self.sl_display_config["vmax"],
-                        origin=self.sl_display_config["origin"],
-                        alpha=self.sl_display_config["alpha"]
-                    )
-                else:
-                    # 普通图像用默认灰度显示
-                    self.raw_ax.imshow(self.raw_data, cmap='gray')
                 self.raw_ax.set_title(
                     f"{self.data_source} (尺寸: {self.raw_data.shape})",
                     fontsize=self.font_size_large, fontfamily=self.font_family
                 )
             # 投影数据类型显示
             else:
-                self.raw_ax.imshow(self.raw_data, cmap='gray')
                 self.raw_ax.set_title(
                     f"{self.data_source} (角度数: {self.raw_data.shape[0]}, 探测器数: {self.raw_data.shape[1]})",
                     fontsize=self.font_size_large, fontfamily=self.font_family
@@ -568,42 +546,6 @@ class CTReconstructionApp:
         y_center = (ylim[0] + ylim[1]) / 2
         radius = max(abs(xlim[1] - xlim[0]), abs(ylim[1] - ylim[0])) / 2 * 1.2
         
-        # 计算扫描线端点（垂直于投影方向的线，或代表射线方向的线）
-        # 这里使用代表射线方向的线：angle=0时垂直
-        dx = radius * np.sin(angle)
-        dy = radius * np.cos(angle)
-        
-        self.scan_line.set_data([x_center - dx, x_center + dx], [y_center - dy, y_center + dy])
-        
-        # 2. 动态更新正弦图（每隔几帧更新一次，避免过慢）
-        if i % 5 == 0 or i == num_angles - 1:
-            # 临时保存完整的 sinogram 数据以便显示
-            self.sinogram_data = sinogram
-            self.angles_data = np.linspace(0, np.pi, num_angles, endpoint=False, dtype=np.float32)
-            self._display_sinogram_data()
-            
-            # 更新标题显示进度
-            self.raw_ax.set_title(
-                f"正在模拟扫描: {int(i/num_angles*100)}% (角度: {int(np.rad2deg(angle))}°)",
-                fontsize=self.font_size_large, fontfamily=self.font_family, color='red'
-            )
-            self.raw_canvas.draw_idle()
-            self.root.update()
-
-    def _update_scan_animation(self, i, angle, num_angles, sinogram):
-        """模拟扫描时的动画回调函数"""
-        # 1. 更新原始图像上的扫描线
-        if not hasattr(self, 'scan_line'):
-            # 首次创建扫描线对象
-            self.scan_line, = self.raw_ax.plot([], [], color='red', linewidth=2, alpha=0.7)
-        
-        # 获取当前坐标系范围
-        xlim = self.raw_ax.get_xlim()
-        ylim = self.raw_ax.get_ylim()
-        x_center = (xlim[0] + xlim[1]) / 2
-        y_center = (ylim[0] + ylim[1]) / 2
-        radius = max(abs(xlim[1] - xlim[0]), abs(ylim[1] - ylim[0])) / 2 * 1.2
-        
         # 计算扫描线端点：angle=0时垂直
         dx = radius * np.sin(angle)
         dy = radius * np.cos(angle)
@@ -646,9 +588,13 @@ class CTReconstructionApp:
             self.simulate_btn.config(state="disabled")
             self.root.update()
 
+            # ========== 核心修改：统一对当前图像进行模拟扫描 ==========
+            # 无论 Shepp-Logan 还是导入图像，均直接对 self.raw_data (0-255 范围) 进行扫描
+            scan_input = self.raw_data
+
             # 模拟CT扫描（带动画回调）
             self.sinogram_data, self.angles_data = simulate_ct_scan(
-                self.raw_data, 
+                scan_input, 
                 num_angles=num_angles,
                 callback=self._update_scan_animation
             )
@@ -663,7 +609,7 @@ class CTReconstructionApp:
             
             self.root.config(cursor="")
             self.simulate_btn.config(state="normal")
-            messagebox.showinfo("成功", f"CT模拟扫描完成（{num_angles}个投影角度）")
+            messagebox.showinfo("成功", "CT模拟扫描完成！")
 
         except ValueError as e:
             self.root.config(cursor="")
@@ -791,19 +737,8 @@ class CTReconstructionApp:
         if self.recon_result is not None:
             self.recon_ax.clear()
 
-            # 如果是Shepp-Logan幻影重建结果，沿用相同的显示参数
-            if self.data_source and "Shepp-Logan" in self.data_source:
-                self.recon_ax.imshow(
-                    self.recon_result,
-                    cmap=self.sl_display_config["cmap"],
-                    extent=self.sl_display_config["extent"],
-                    vmin=self.sl_display_config["vmin"],
-                    vmax=self.sl_display_config["vmax"],
-                    origin=self.sl_display_config["origin"],
-                    alpha=self.sl_display_config["alpha"]
-                )
-            else:
-                self.recon_ax.imshow(self.recon_result, cmap='gray')
+            # 统一使用灰度显示，结果已在 _run_reconstruction 中归一化到 0-255
+            self.recon_ax.imshow(self.recon_result, cmap='gray', vmin=0, vmax=255)
 
             self.recon_ax.set_title(
                 f"重建结果 (尺寸: {self.recon_result.shape})",

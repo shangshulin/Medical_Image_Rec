@@ -95,12 +95,9 @@ def direct_backprojection_recon(sinogram, angles, params=None):
         # 4.3 反投影累加
         recon_img += interpolated_vals
 
-    # 5. 归一化（保留原逻辑，消除角度数和弧度影响+适配显示）
+    # 5. 归一化（仅消除角度数影响，保留原始物理值范围）
     recon_img = recon_img * (np.pi / (2 * num_angles))
-    # 灰度值归一化到[0, 255]
-    recon_img = (recon_img - np.min(recon_img)) / (np.max(recon_img) - np.min(recon_img) + 1e-8) * 255
-    recon_img = recon_img.astype(np.uint8)
-
+    
     return recon_img
 
 
