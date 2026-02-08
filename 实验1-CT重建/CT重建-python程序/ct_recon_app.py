@@ -103,11 +103,12 @@ RECONSTRUCTION_ALGORITHMS = {
 
 
 # ---------------------- 3. 模拟CT扫描模块 ----------------------
-def simulate_ct_scan(image, num_angles=180):
+def simulate_ct_scan(image, num_angles=180, callback=None):
     """
     对输入图像模拟CT扫描，生成物理意义正确的正弦图（投影数据）
     :param image: 输入图像，numpy数组，shape=(H, W)
     :param num_angles: 投影角度数量（默认180）
+    :param callback: 回调函数，用于更新动画 (current_index, current_angle, total_angles, current_sinogram)
     :return: sinogram（投影数据，shape=(num_angles, 探测器数)）、angles（投影角度，弧度）
     """
     # 统一图像尺寸为正方形（CT扫描常规处理）
@@ -136,6 +137,10 @@ def simulate_ct_scan(image, num_angles=180):
 
         # 步骤3：将投影值赋值给当前角度的正弦图
         sinogram[i] = projection
+
+        # 如果有回调，执行回调更新动画
+        if callback:
+            callback(i, angle, num_angles, sinogram)
 
     # ========== 关键修改2：调整标准化逻辑，适配归一化后的Shepp-Logan数据 ==========
     # 原逻辑会重复归一化，改为仅当数据最大值>255时才缩放
@@ -253,9 +258,15 @@ class CTReconstructionApp:
         self.angle_num_var = tk.StringVar(value="180")
         ttk.Entry(row2_frame, textvariable=self.angle_num_var, width=10).pack(side=tk.LEFT)
 
+        # 模拟扫描按钮
+        self.simulate_btn = ttk.Button(row2_frame, text="开始模拟扫描",
+                                     command=self._run_simulation)
+        self.simulate_btn.pack(side=tk.LEFT, padx=20)
+
         # 重建按钮
-        ttk.Button(row2_frame, text="开始重建",
-                   command=self._run_reconstruction).pack(side=tk.LEFT, padx=20)
+        self.recon_btn = ttk.Button(row2_frame, text="开始重建",
+                                   command=self._run_reconstruction)
+        self.recon_btn.pack(side=tk.LEFT, padx=5)
 
         # 2. 图像显示区域（新增投影数据显示区）
         display_frame = ttk.Frame(self.root)
@@ -360,6 +371,17 @@ class CTReconstructionApp:
             self.raw_data = shepp_logan_phantom(size)
             self.data_type = "shepp_logan_image"
             self.data_source = f"生成的Shepp-Logan幻影图像（{size}x{size}）"
+            
+            # 清空之前的投影和重建结果，强制重新模拟
+            self.sinogram_data = None
+            self.angles_data = None
+            self.recon_result = None
+            self.sinogram_ax.clear()
+            self.sinogram_ax.set_title("等待模拟扫描...", fontsize=self.font_size_large, fontfamily=self.font_family)
+            self.sinogram_canvas.draw()
+            self.recon_ax.clear()
+            self.recon_ax.set_title("未进行重建", fontsize=self.font_size_large, fontfamily=self.font_family)
+            self.recon_canvas.draw()
 
             # 恢复正常光标
             self.root.config(cursor="")
@@ -398,6 +420,12 @@ class CTReconstructionApp:
                     self.raw_data = np.array(img, dtype=np.float32)
                     self.data_type = "image"
                     self.data_source = f"上传图像：{os.path.basename(file_path)}"
+                    # 清空之前的投影数据，强制重新模拟
+                    self.sinogram_data = None
+                    self.angles_data = None
+                    self.sinogram_ax.clear()
+                    self.sinogram_ax.set_title("等待模拟扫描...", fontsize=self.font_size_large, fontfamily=self.font_family)
+                    self.sinogram_canvas.draw()
                 else:
                     # 加载投影数据（需确保是(sinogram, angles)格式，或单独sinogram）
                     if file_path.endswith('.npy'):
@@ -526,10 +554,133 @@ class CTReconstructionApp:
             self.sinogram_fig.tight_layout()  # 强制刷新布局，避免累积偏移
             self.sinogram_canvas.draw()
 
-    def _run_reconstruction(self):
-        """执行重建算法（核心：根据数据类型自动处理）"""
+    def _update_scan_animation(self, i, angle, num_angles, sinogram):
+        """模拟扫描时的动画回调函数"""
+        # 1. 更新原始图像上的扫描线
+        if not hasattr(self, 'scan_line'):
+            # 首次创建扫描线对象
+            self.scan_line, = self.raw_ax.plot([], [], color='red', linewidth=2, alpha=0.7)
+        
+        # 获取当前坐标系范围
+        xlim = self.raw_ax.get_xlim()
+        ylim = self.raw_ax.get_ylim()
+        x_center = (xlim[0] + xlim[1]) / 2
+        y_center = (ylim[0] + ylim[1]) / 2
+        radius = max(abs(xlim[1] - xlim[0]), abs(ylim[1] - ylim[0])) / 2 * 1.2
+        
+        # 计算扫描线端点（垂直于投影方向的线，或代表射线方向的线）
+        # 这里使用代表射线方向的线：angle=0时垂直
+        dx = radius * np.sin(angle)
+        dy = radius * np.cos(angle)
+        
+        self.scan_line.set_data([x_center - dx, x_center + dx], [y_center - dy, y_center + dy])
+        
+        # 2. 动态更新正弦图（每隔几帧更新一次，避免过慢）
+        if i % 5 == 0 or i == num_angles - 1:
+            # 临时保存完整的 sinogram 数据以便显示
+            self.sinogram_data = sinogram
+            self.angles_data = np.linspace(0, np.pi, num_angles, endpoint=False, dtype=np.float32)
+            self._display_sinogram_data()
+            
+            # 更新标题显示进度
+            self.raw_ax.set_title(
+                f"正在模拟扫描: {int(i/num_angles*100)}% (角度: {int(np.rad2deg(angle))}°)",
+                fontsize=self.font_size_large, fontfamily=self.font_family, color='red'
+            )
+            self.raw_canvas.draw_idle()
+            self.root.update()
+
+    def _update_scan_animation(self, i, angle, num_angles, sinogram):
+        """模拟扫描时的动画回调函数"""
+        # 1. 更新原始图像上的扫描线
+        if not hasattr(self, 'scan_line'):
+            # 首次创建扫描线对象
+            self.scan_line, = self.raw_ax.plot([], [], color='red', linewidth=2, alpha=0.7)
+        
+        # 获取当前坐标系范围
+        xlim = self.raw_ax.get_xlim()
+        ylim = self.raw_ax.get_ylim()
+        x_center = (xlim[0] + xlim[1]) / 2
+        y_center = (ylim[0] + ylim[1]) / 2
+        radius = max(abs(xlim[1] - xlim[0]), abs(ylim[1] - ylim[0])) / 2 * 1.2
+        
+        # 计算扫描线端点：angle=0时垂直
+        dx = radius * np.sin(angle)
+        dy = radius * np.cos(angle)
+        
+        self.scan_line.set_data([x_center - dx, x_center + dx], [y_center - dy, y_center + dy])
+        
+        # 2. 动态更新正弦图（每隔几帧更新一次，或最后一帧更新）
+        if i % 5 == 0 or i == num_angles - 1:
+            self.sinogram_data = sinogram
+            # 确保 angles_data 长度与 sinogram 一致以便 _display_sinogram_data 正确工作
+            if self.angles_data is None or len(self.angles_data) != num_angles:
+                self.angles_data = np.linspace(0, np.pi, num_angles, endpoint=False, dtype=np.float32)
+            
+            self._display_sinogram_data()
+            
+            # 更新标题显示进度
+            self.raw_ax.set_title(
+                f"正在模拟扫描: {int((i+1)/num_angles*100)}% (角度: {int(np.rad2deg(angle))}°)",
+                fontsize=self.font_size_large, fontfamily=self.font_family, color='red'
+            )
+            self.raw_canvas.draw_idle()
+            self.root.update()
+
+    def _run_simulation(self):
+        """执行CT模拟扫描"""
         if self.raw_data is None:
-            messagebox.showwarning("警告", f"请先加载或生成原始数据/图像！")
+            messagebox.showwarning("警告", "请先加载或生成原始图像！")
+            return
+        
+        if self.data_type not in ["image", "shepp_logan_image"]:
+            messagebox.showwarning("警告", "当前数据已是投影数据，无需模拟扫描！")
+            return
+
+        try:
+            num_angles = int(self.angle_num_var.get())
+            if num_angles <= 0 or num_angles > 360:
+                raise ValueError("投影角度数必须为1-360之间的整数")
+
+            self.root.config(cursor="wait")
+            self.simulate_btn.config(state="disabled")
+            self.root.update()
+
+            # 模拟CT扫描（带动画回调）
+            self.sinogram_data, self.angles_data = simulate_ct_scan(
+                self.raw_data, 
+                num_angles=num_angles,
+                callback=self._update_scan_animation
+            )
+            
+            # 扫描完成后清理
+            if hasattr(self, 'scan_line'):
+                self.scan_line.remove()
+                delattr(self, 'scan_line')
+            
+            self._display_raw_data()
+            self._display_sinogram_data()
+            
+            self.root.config(cursor="")
+            self.simulate_btn.config(state="normal")
+            messagebox.showinfo("成功", f"CT模拟扫描完成（{num_angles}个投影角度）")
+
+        except ValueError as e:
+            self.root.config(cursor="")
+            self.simulate_btn.config(state="normal")
+            messagebox.showerror("错误", f"参数错误：{str(e)}")
+        except Exception as e:
+            self.root.config(cursor="")
+            self.simulate_btn.config(state="normal")
+            messagebox.showerror("错误", f"模拟扫描失败：{str(e)}")
+
+    def _run_reconstruction(self):
+        """执行重建算法"""
+        if self.sinogram_data is None or self.angles_data is None:
+            if self.data_type in ["image", "shepp_logan_image"]:
+                messagebox.showwarning("警告", "请先执行“模拟扫描”生成投影数据！")
+            else:
+                messagebox.showwarning("警告", "投影数据缺失，请先加载数据！")
             return
 
         selected_algorithm = self.algorithm_var.get()
@@ -539,26 +690,10 @@ class CTReconstructionApp:
 
         try:
             self.root.config(cursor="wait")
+            self.recon_btn.config(state="disabled")
             self.root.update()
 
-            # 步骤1：根据数据类型生成投影数据（若需要）
-            if self.data_type in ["image", "shepp_logan_image"]:
-                # 图像类型→先模拟CT扫描生成投影数据
-                num_angles = int(self.angle_num_var.get())
-                if num_angles <= 0 or num_angles > 360:
-                    raise ValueError("投影角度数必须为1-360之间的整数")
-
-                # 模拟CT扫描
-                self.sinogram_data, self.angles_data = simulate_ct_scan(self.raw_data, num_angles=num_angles)
-                # 显示投影数据
-                self._display_sinogram_data()
-                messagebox.showinfo("提示", f"已对图像完成CT模拟扫描（{num_angles}个投影角度）")
-
-            # 步骤2：检查投影数据是否存在
-            if self.sinogram_data is None or self.angles_data is None:
-                raise ValueError("投影数据缺失！无法执行重建")
-
-            # 步骤3：调用重建算法
+            # 步骤1：调用重建算法
             # 获取当前选择的滤波器类型
             current_filter = self.filter_type_var.get()
 
@@ -580,11 +715,8 @@ class CTReconstructionApp:
                 # 步骤2：弧度转角度（算法要求角度制）
                 angles_deg = np.rad2deg(self.angles_data)
 
-                # 步骤3：确定重建图像尺寸（与原始图像/探测器数一致）
-                if self.data_type in ["image", "shepp_logan_image"]:
-                    image_size = self.raw_data.shape[0]  # 用原始图像尺寸
-                else:
-                    image_size = self.sinogram_data.shape[1]  # 用探测器数量作为图像尺寸
+                # 步骤3：确定重建图像尺寸（与探测器数一致）
+                image_size = self.sinogram_data.shape[1]
 
                 # 步骤4：调用傅里叶算法（参数完整传递）
                 self.recon_result = fourier_backprojection(
@@ -596,14 +728,9 @@ class CTReconstructionApp:
                 msg = "傅里叶重建完成"
             elif selected_algorithm == "反投影滤波重建":
                 # 步骤1：确定重建图像尺寸
-                if self.data_type in ["image", "shepp_logan_image"]:
-                    image_size = self.raw_data.shape[0]
-                else:
-                    image_size = self.sinogram_data.shape[1]
+                image_size = self.sinogram_data.shape[1]
 
                 # 步骤2：调用反投影滤波算法
-                # sinogram_data: (angles, detectors), angles_data: (radians)
-                # backprojection_filter 已实现自动维度适配
                 self.recon_result = backprojection_filter(
                     sinogram=self.sinogram_data,
                     angles=self.angles_data,
@@ -614,43 +741,37 @@ class CTReconstructionApp:
                 msg = f"反投影滤波重建完成 ({current_filter})"
             elif selected_algorithm == "滤波反投影重建":
                 # 步骤1：确定重建图像尺寸
-                if self.data_type in ["image", "shepp_logan_image"]:
-                    image_size = self.raw_data.shape[0]
-                else:
-                    image_size = self.sinogram_data.shape[1]
+                image_size = self.sinogram_data.shape[1]
 
                 # 步骤2：调用滤波反投影算法
-                # filtered_backprojection 已实现自动维度适配
-                self.recon_result = filtered_backprojection(
+                self.filtered_backprojection_result = filtered_backprojection(
                     sinogram=self.sinogram_data,
                     angles=self.angles_data,
                     image_size=image_size,
                     filter_type=current_filter  # 使用选择的滤波器
                 )
+                self.recon_result = self.filtered_backprojection_result
                 status = "success"
                 msg = f"滤波反投影重建完成 ({current_filter})"
             else:
-                # 可扩展其他算法调用逻辑
                 raise NotImplementedError(f"暂未实现{selected_algorithm}的调用逻辑")
 
             self.root.config(cursor="")
+            self.recon_btn.config(state="normal")
 
-            # 步骤4：判断重建结果并显示
+            # 步骤2：判断重建结果并显示
             if status == "success":
-                # ========== 关键修改5：重建结果归一化显示 ==========
-                # 确保重建结果在0~255范围显示
+                # 重建结果归一化显示
                 if self.recon_result is not None:
                     recon_min = np.min(self.recon_result)
                     recon_max = np.max(self.recon_result)
                     if recon_max - recon_min > 1e-6:
                         self.recon_result = (self.recon_result - recon_min) / (recon_max - recon_min) * 255.0
                 self._display_recon_result()
-                 # 动态拼接弹窗提示文本：区分是否显示滤波器
+                
                 if selected_algorithm in ["直接反投影重建", "傅里叶重建"]:
-                    # 直接反投影/傅里叶重建：不显示滤波器
                     success_msg = f"{selected_algorithm}完成！"
                 else:
-                    # 反投影滤波/滤波反投影重建：显示滤波器
                     success_msg = f"{selected_algorithm}({current_filter})完成！"
                 messagebox.showinfo("成功", success_msg)
             else:
@@ -658,12 +779,11 @@ class CTReconstructionApp:
 
         except ValueError as e:
             self.root.config(cursor="")
+            self.recon_btn.config(state="normal")
             messagebox.showerror("错误", f"参数错误：{str(e)}")
-        except NotImplementedError as e:
-            self.root.config(cursor="")
-            messagebox.showerror("错误", str(e))
         except Exception as e:
             self.root.config(cursor="")
+            self.recon_btn.config(state="normal")
             messagebox.showerror("错误", f"重建失败：{str(e)}")
 
     def _display_recon_result(self):
