@@ -340,7 +340,7 @@ class BUSReconstructionApp:
             messagebox.showwarning("警告", "请先上传数据文件！")
             return
 
-        # 平均后重建
+        # 平均后重建，抵消噪声
         d_avg = np.mean(self.frame_data_list, axis=0)
         
         # 根据用户选择的探头类型进行重建
@@ -355,9 +355,9 @@ class BUSReconstructionApp:
 
         # 显示重建图像
         self.ax2.clear()
-        img = np.ma.masked_less(self.recon_data, 0)
-        cm = plt.cm.gray.copy()
-        cm.set_bad(color='black')
+        img = np.ma.masked_less(self.recon_data, 0) # 创建掩码数组，将小于0的值设为掩码（不显示）
+        cm = plt.cm.gray.copy() # 复制灰度颜色映射
+        cm.set_bad(color='black') # 设置掩码区域显示为黑色
         
         self.ax2.imshow(img, cmap=cm, origin='upper', aspect=aspect_type, 
                         interpolation='nearest', extent=[0, img.shape[1], img.shape[0], 0])
@@ -401,8 +401,8 @@ def image_reconstruct_linear(d):
     """线阵图像重建：使用双三次插值优化显示效果"""
     # 增加插值倍率，使图像更平滑，消除马赛克感
     # order=3 表示使用双三次插值 (Bicubic)
-    scale_h = 2.0
-    scale_w = 4.0
+    scale_h = 2.0 # 垂直方向放大2倍
+    scale_w = 4.0 # 水平方向放大4倍
     recon = ndimage.zoom(d, (scale_h, scale_w), order=3)
     return recon
 

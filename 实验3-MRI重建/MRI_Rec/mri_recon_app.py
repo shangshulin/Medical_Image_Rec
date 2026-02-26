@@ -13,33 +13,33 @@ plt.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
 
 # FID文件读取函数
 def read_fid(file_path):
-    SW = 20  # 采样宽度，与MATLAB保持一致
+    SW = 20  # 采样宽度，与MATLAB保持一致，用于后续计算时间轴
     try:
-        fid = open(file_path, 'rb')
+        fid = open(file_path, 'rb') # 二进制只读模式
     except:
         messagebox.showerror("错误", "无法打开指定的FID文件！")
         return None, None, None, None
     
-    # 读取文件头信息（int32类型，小端）
+    # 读取文件头信息（从文件中读取一个32位有符号整数，小端）
     def read_int32():
-        return np.frombuffer(fid.read(4), dtype=np.int32)[0]
+        return np.frombuffer(fid.read(4), dtype=np.int32)[0] # 从当前位置读取4个字节
     
-    FileVersion = read_int32()
-    Section1Size = read_int32()
+    FileVersion = read_int32() # 文件版本号
+    Section1Size = read_int32() # 数据段
     Section2Size = read_int32()
     Section3Size = read_int32()
     Section4Size = read_int32()
     Section5Size = read_int32()
     
     Position = Section1Size + Section2Size + Section3Size + Section4Size
-    # 跳过偏移字节
+    # 跳过偏移字节，定位到第5段（实际K空间数据所在位置）的起始偏移量
     fid.read(Position)
     
     # 读取维度信息
-    Dimension1 = read_int32()
-    Dimension2 = read_int32()
-    Dimension3 = read_int32()
-    Dimension4 = read_int32()
+    Dimension1 = read_int32() # 频率编码方向点数（如256）
+    Dimension2 = read_int32() # 相位编码方向点数（如256）
+    Dimension3 = read_int32() # 切片数量（如32，即3D扫描的层数）
+    Dimension4 = read_int32() # 回波数或通道数（如1）
     
     # 初始化实部和虚部数组
     DataReal = np.zeros((Dimension1, Dimension2, Dimension3, Dimension4), dtype=np.float32)
@@ -50,17 +50,22 @@ def read_fid(file_path):
         for k in range(Dimension3):
             for j in range(Dimension2):
                 # 读取一行数据：2*Dimension1个float32
+                # *2：每个点包含实部和虚部两个数
+                # *4：每个float32占4字节
+                # reshape：第 0 列实部，第 1 列虚部
                 data = np.frombuffer(fid.read(2 * Dimension1 * 4), dtype=np.float32).reshape(-1, 2)
-                DataReal[:, j, k, l] = data[:, 0]
-                DataImaginary[:, j, k, l] = data[:, 1]
+                DataReal[:, j, k, l] = data[:, 0] # 所有实部
+                DataImaginary[:, j, k, l] = data[:, 1] # 所有虚部
     
     fid.close()
     
-    section = Dimension3
-    tau = np.arange(Dimension1)[:, np.newaxis] / SW  # 时间轴
+    section = Dimension3 # 将切片数（第3维大小）赋值给 section，用于后续UI显示切片选择下拉框
+    tau = np.arange(Dimension1)[:, np.newaxis] / SW  # 生成时间轴数组
     Data = DataReal + 1j * DataImaginary  # 复数K空间数据
-    pp = 0
-    
+    pp = 0 # 保留参数
+    # tau：时间轴（用于谱分析）
+    # Data：完整的K空间复数数据
+    # section：切片数量（Dimension3）
     return tau, Data, pp, section
 
 # 灰度拉伸函数（对应MATLAB的gray_trans）
