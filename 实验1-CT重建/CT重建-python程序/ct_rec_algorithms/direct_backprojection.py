@@ -10,34 +10,19 @@ DEFAULT_RECON_PARAMS = {
 
 
 # -------------------------- 核心工具函数 --------------------------
-def _interpolate_projection(x_coords, projection_data, method="linear"):
+def _interpolate_projection(x_coords, projection_data):
     """
-    投影数据插值（匹配主程序的插值配置）
+    投影数据线性插值
     :param x_coords: 待插值的坐标数组
     :param projection_data: 单角度投影数据，shape=(detector_num,)
-    :param method: 插值方式：linear/nearest
     :return: 插值后的投影值数组
     """
     detector_num = len(projection_data)
     # 探测器坐标归一化到[-detector_num/2, detector_num/2)
     detector_coords = np.linspace(-detector_num / 2, detector_num / 2, detector_num, endpoint=False)
-
-    if method == "linear":
-        # 线性插值（主程序默认）
-        interpolated_vals = np.interp(
-            x_coords, detector_coords, projection_data, left=0, right=0
-        )
-    elif method == "nearest":
-        # 最近邻插值
-        idx = np.clip(
-            np.round(x_coords + detector_num / 2).astype(int),
-            0, detector_num - 1
-        )
-        interpolated_vals = projection_data[idx]
-    else:
-        raise ValueError(f"不支持的插值方式：{method}，仅支持linear/nearest")
-
-    return interpolated_vals
+    
+    # 线性插值
+    return np.interp(x_coords, detector_coords, projection_data, left=0, right=0)
 
 
 # -------------------------- 核心重建函数 --------------------------
@@ -88,8 +73,7 @@ def direct_backprojection_recon(sinogram, angles, params=None):
         # 4.2 插值获取投影值（匹配当前像素）
         interpolated_vals = _interpolate_projection(
             proj_coords,
-            raw_sinogram[angle_idx],  # 使用原始投影数据（无滤波）
-            method=recon_params["interpolation"]
+            raw_sinogram[angle_idx]  # 使用原始投影数据（无滤波）
         )
 
         # 4.3 反投影累加
