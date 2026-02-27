@@ -240,7 +240,7 @@ def frameProcess(file_path, n_lines=None, n_samples=None):
         Cdata[n, :] = processF(data[n, :])
 
     # 转置（匹配MATLAB转置操作，行列互换以适配后续重建逻辑）
-    CData = CData.T
+    CData = Cdata.T
     return CData
 
 def image_reconstruct(d, half_angle_rad=None):
