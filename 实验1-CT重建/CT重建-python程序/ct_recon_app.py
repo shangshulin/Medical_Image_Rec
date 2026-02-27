@@ -61,30 +61,6 @@ def shepp_logan_phantom(size=256):
     return phantom
 
 
-def generate_sinogram(phantom, angles=180):
-    """从Shepp-Logan幻影生成正弦图（投影数据），模拟真实CT原始数据"""
-    size = phantom.shape[0]
-    theta = np.linspace(0, 180, angles, endpoint=False)  # 投影角度
-    sinogram = np.zeros((size, angles), dtype=np.float32)
-
-    # 创建投影坐标
-    x = np.linspace(-1, 1, size)
-    y = np.linspace(-1, 1, size)
-    X, Y = np.meshgrid(x, y)
-
-    for i, angle in enumerate(theta):
-        # 旋转坐标
-        angle_rad = np.deg2rad(angle)
-        X_rot = X * np.cos(angle_rad) + Y * np.sin(angle_rad)
-        Y_rot = -X * np.sin(angle_rad) + Y * np.cos(angle_rad)
-
-        # 沿X轴积分（投影）
-        for j in range(size):
-            mask = (Y_rot[:, j] >= -1) & (Y_rot[:, j] <= 1)
-            if np.any(mask):
-                sinogram[j, i] = np.sum(phantom[mask, j])
-
-    return sinogram
 
 
 # ---------------------- 2. 算法模块 ----------------------
