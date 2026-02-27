@@ -60,9 +60,6 @@ def shepp_logan_phantom(size=256):
 
     return phantom
 
-
-
-
 # ---------------------- 2. 算法模块 ----------------------
 # 算法字典：更新为四种指定算法（键为显示名称，值为对应函数）
 RECONSTRUCTION_ALGORITHMS = {
@@ -727,9 +724,7 @@ class CTReconstructionApp:
 
 # ---------------------- 4. 程序入口 ----------------------
 if __name__ == "__main__":
-    # 确保中文显示正常（与generate_shepp_logan_phantom.py对齐）
-    plt.rcParams["font.family"] = ["SimHei"]
-    plt.rcParams['axes.unicode_minus'] = False
+
 
     root = tk.Tk()
     app = CTReconstructionApp(root)
